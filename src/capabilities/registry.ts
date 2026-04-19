@@ -6,6 +6,7 @@ import { createCreateFileTool } from './filesystem/create-file.js';
 import { createListDirTool } from './filesystem/list-dir.js';
 import { createDeleteFileTool } from './filesystem/delete-file.js';
 import { createEditFileTool } from './filesystem/edit-file.js';
+import { createSendFileTool } from './filesystem/send-file.js';
 import { createRunCommandTool } from './shell/run-command.js';
 import { createApproveCommandTool } from './shell/approve-command.js';
 import { createInstallSkillTool } from './skills/install-skill.js';
@@ -33,16 +34,20 @@ export class CapabilityRegistry {
   private skillLoader?: SkillLoader;
   private scheduler?: Scheduler;
   private tokenBudget?: TokenBudget;
+  private sendFileHandler?: (filePath: string) => Promise<void>;
 
   constructor(skillLoader?: SkillLoader, scheduler?: Scheduler, tokenBudget?: TokenBudget) {
     this.permissions = new PermissionManager();
     this.skillLoader = skillLoader;
     this.scheduler = scheduler;
     this.tokenBudget = tokenBudget;
-    this.registerAll();
   }
 
-  private registerAll(): void {
+  setSendFileHandler(handler: (filePath: string) => Promise<void>): void {
+    this.sendFileHandler = handler;
+  }
+
+  registerAll(): void {
     const manifest = this.permissions.getManifest();
 
     if (manifest.capabilities.filesystem.enabled) {
@@ -52,6 +57,11 @@ export class CapabilityRegistry {
       this.tools.list_dir = createListDirTool(this.permissions);
       this.tools.delete_file = createDeleteFileTool(this.permissions);
       this.tools.edit_file = createEditFileTool(this.permissions);
+
+      if (this.sendFileHandler) {
+        this.tools.send_file = createSendFileTool(this.permissions, this.sendFileHandler);
+      }
+
       logger.info('Filesystem tools registered');
     }
 

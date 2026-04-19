@@ -1,9 +1,14 @@
-import { Bot } from 'grammy';
+import fs from 'node:fs';
+import path from 'node:path';
+import { Bot, InputFile } from 'grammy';
 import { autoRetry } from '@grammyjs/auto-retry';
 import type { ChannelMessage } from '../types/channel.js';
 import { BaseChannel } from './base.js';
 import type { MercuryConfig } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
+import { mdToTelegram } from '../utils/markdown.js';
+
+const MAX_MESSAGE_LENGTH = 4096;
 
 export class TelegramChannel extends BaseChannel {
   readonly type = 'telegram' as const;
@@ -72,8 +77,55 @@ export class TelegramChannel extends BaseChannel {
       return;
     }
     const timeSuffix = elapsedMs != null ? `\n⏱ ${(elapsedMs / 1000).toFixed(1)}s` : '';
-    logger.debug({ chatId, textLen: content.length }, 'Telegram sending message');
-    await this.bot.api.sendMessage(chatId, content + timeSuffix);
+    const fullContent = content + timeSuffix;
+    const html = mdToTelegram(fullContent);
+    const chunks = this.splitMessage(html, MAX_MESSAGE_LENGTH);
+
+    for (const chunk of chunks) {
+      try {
+        await this.bot.api.sendMessage(chatId, chunk, { parse_mode: 'HTML' });
+      } catch (err: any) {
+        logger.warn({ err: err.message }, 'HTML parse failed, sending as plain text');
+        try {
+          await this.bot.api.sendMessage(chatId, this.stripHtml(chunk));
+        } catch (err2: any) {
+          logger.error({ err: err2.message }, 'Telegram send failed');
+        }
+      }
+    }
+  }
+
+  async sendFile(filePath: string, targetId?: string): Promise<void> {
+    const chatId = this.parseChatId(targetId);
+    if (!chatId || !this.bot) {
+      logger.warn({ targetId, chatId }, 'Telegram sendFile: no valid chat ID');
+      return;
+    }
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) {
+      await this.bot.api.sendMessage(chatId, `File not found: ${filePath}`);
+      return;
+    }
+
+    const inputFile = new InputFile(resolved);
+    const filename = path.basename(resolved);
+    const ext = path.extname(resolved).toLowerCase();
+
+    try {
+      if (this.isImageFile(ext)) {
+        await this.bot.api.sendPhoto(chatId, inputFile, { caption: filename });
+      } else if (this.isAudioFile(ext)) {
+        await this.bot.api.sendAudio(chatId, inputFile, { title: filename });
+      } else if (this.isVideoFile(ext)) {
+        await this.bot.api.sendVideo(chatId, inputFile, { caption: filename });
+      } else {
+        await this.bot.api.sendDocument(chatId, inputFile, { caption: filename });
+      }
+      logger.info({ file: resolved, chatId }, 'File sent via Telegram');
+    } catch (err: any) {
+      logger.error({ err: err.message, file: resolved }, 'Telegram sendFile failed');
+      await this.bot.api.sendMessage(chatId, `Failed to send file: ${err.message}`).catch(() => {});
+    }
   }
 
   async stream(content: AsyncIterable<string>, targetId?: string): Promise<void> {
@@ -84,7 +136,12 @@ export class TelegramChannel extends BaseChannel {
     for await (const chunk of content) {
       full += chunk;
     }
-    await this.bot.api.sendMessage(chatId, full);
+    const html = mdToTelegram(full);
+    try {
+      await this.bot.api.sendMessage(chatId, html, { parse_mode: 'HTML' });
+    } catch (err: any) {
+      await this.bot.api.sendMessage(chatId, this.stripHtml(html));
+    }
   }
 
   async typing(targetId?: string): Promise<void> {
@@ -116,10 +173,56 @@ export class TelegramChannel extends BaseChannel {
       for await (const chunk of textStream) {
         full += chunk;
       }
-      await this.bot.api.sendMessage(chatId, full);
+      const html = mdToTelegram(full);
+      try {
+        await this.bot.api.sendMessage(chatId, html, { parse_mode: 'HTML' });
+      } catch {
+        await this.bot.api.sendMessage(chatId, this.stripHtml(html));
+      }
     } finally {
       this.stopTypingLoop();
     }
+  }
+
+  private splitMessage(text: string, maxLen: number): string[] {
+    if (text.length <= maxLen) return [text];
+    const chunks: string[] = [];
+    let remaining = text;
+    while (remaining.length > 0) {
+      let splitAt = maxLen;
+      if (remaining.length > maxLen) {
+        const lastNewline = remaining.lastIndexOf('\n', maxLen);
+        if (lastNewline > maxLen * 0.5) {
+          splitAt = lastNewline + 1;
+        }
+      }
+      chunks.push(remaining.slice(0, splitAt));
+      remaining = remaining.slice(splitAt);
+    }
+    return chunks;
+  }
+
+  private stripHtml(html: string): string {
+    return html
+      .replace(/<\/?(b|i|s|u|code|pre|a|blockquote|strong|em)[^>]*>/gi, '')
+      .replace(/<pre><code[^>]*>/gi, '')
+      .replace(/<\/code><\/pre>/gi, '')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+  }
+
+  private isImageFile(ext: string): boolean {
+    return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'].includes(ext);
+  }
+
+  private isAudioFile(ext: string): boolean {
+    return ['.mp3', '.ogg', '.wav', '.flac', '.m4a'].includes(ext);
+  }
+
+  private isVideoFile(ext: string): boolean {
+    return ['.mp4', '.mov', '.avi', '.mkv', '.webm'].includes(ext);
   }
 
   private parseChatId(targetId?: string): number | null {
@@ -128,6 +231,7 @@ export class TelegramChannel extends BaseChannel {
       const raw = Number(targetId.split(':')[1]);
       return isNaN(raw) ? this.ownerChatId : raw;
     }
+    if (targetId === 'notification') return this.ownerChatId;
     const num = Number(targetId);
     return isNaN(num) ? this.ownerChatId : num;
   }

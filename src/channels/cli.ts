@@ -1,8 +1,11 @@
 import readline from 'node:readline';
+import fs from 'node:fs';
+import path from 'node:path';
 import chalk from 'chalk';
 import type { ChannelMessage } from '../types/channel.js';
 import { BaseChannel } from './base.js';
 import { logger } from '../utils/logger.js';
+import { renderMarkdown } from '../utils/markdown.js';
 
 export class CLIChannel extends BaseChannel {
   readonly type = 'cli' as const;
@@ -55,17 +58,44 @@ export class CLIChannel extends BaseChannel {
 
   async send(content: string, _targetId?: string, elapsedMs?: number): Promise<void> {
     const timeStr = elapsedMs != null ? chalk.dim(` (${(elapsedMs / 1000).toFixed(1)}s)`) : '';
+    const rendered = renderMarkdown(content);
     console.log('');
     console.log(chalk.cyan(`  ${this.agentName}:`) + timeStr);
-    console.log(`  ${content}`);
+    const indented = rendered
+      .split('\n')
+      .map((line: string) => `  ${line}`)
+      .join('\n');
+    console.log(indented);
+    console.log('');
+    this.showPrompt();
+  }
+
+  async sendFile(filePath: string, _targetId?: string): Promise<void> {
+    const resolved = path.resolve(filePath);
+    if (!fs.existsSync(resolved)) {
+      console.log(chalk.red(`  File not found: ${filePath}`));
+      return;
+    }
+    const stat = fs.statSync(resolved);
+    const sizeStr = stat.size > 1024 * 1024
+      ? `${(stat.size / (1024 * 1024)).toFixed(1)}MB`
+      : stat.size > 1024
+        ? `${(stat.size / 1024).toFixed(1)}KB`
+        : `${stat.size}B`;
+    console.log('');
+    console.log(chalk.cyan(`  ${this.agentName}:`) + chalk.dim(' (file)'));
+    console.log(chalk.dim(`  path: ${resolved}`));
+    console.log(chalk.dim(`  size: ${sizeStr}`));
     console.log('');
     this.showPrompt();
   }
 
   async stream(content: AsyncIterable<string>, _targetId?: string): Promise<void> {
     process.stdout.write(chalk.cyan(`  ${this.agentName}: `));
+    let full = '';
     for await (const chunk of content) {
       process.stdout.write(chunk);
+      full += chunk;
     }
     process.stdout.write('\n\n');
     this.showPrompt();

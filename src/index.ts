@@ -155,6 +155,17 @@ async function runAgent(): Promise<void> {
   const channels = new ChannelRegistry(config);
   const capabilities = new CapabilityRegistry(skillLoader, scheduler, tokenBudget);
 
+  capabilities.setSendFileHandler(async (filePath: string) => {
+    const msg = channels.getActiveChannels().includes('telegram')
+      ? channels.get('telegram')
+      : channels.get('cli');
+    if (msg) {
+      await msg.sendFile(filePath);
+    }
+  });
+
+  capabilities.registerAll();
+
   const agent = new Agent(
     config, providers, identity, shortTerm, longTerm, episodic, channels, tokenBudget, capabilities, scheduler,
   );

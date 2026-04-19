@@ -36,6 +36,8 @@
     "grammy": "^1.42.0",
     "ink": "^5.2.0",
     "js-tiktoken": "^1.0.19",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.0",
     "node-cron": "^3.0.3",
     "pino": "^9.6.0",
     "react": "^18.3.1",
@@ -43,6 +45,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/marked-terminal": "^6.1.1",
     "@types/node": "^22.13.0",
     "@types/node-cron": "^3.0.11",
     "@types/react": "^18.3.0",

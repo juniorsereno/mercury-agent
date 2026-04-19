@@ -5,6 +5,7 @@ export interface Channel {
   start(): Promise<void>;
   stop(): Promise<void>;
   send(content: string, targetId?: string, elapsedMs?: number): Promise<void>;
+  sendFile(filePath: string, targetId?: string): Promise<void>;
   stream(content: AsyncIterable<string>, targetId?: string): Promise<void>;
   typing(targetId?: string): Promise<void>;
   isReady(): boolean;
@@ -19,6 +20,7 @@ export abstract class BaseChannel implements Channel {
   abstract start(): Promise<void>;
   abstract stop(): Promise<void>;
   abstract send(content: string, targetId?: string, elapsedMs?: number): Promise<void>;
+  abstract sendFile(filePath: string, targetId?: string): Promise<void>;
   abstract stream(content: AsyncIterable<string>, targetId?: string): Promise<void>;
   abstract typing(targetId?: string): Promise<void>;
 
