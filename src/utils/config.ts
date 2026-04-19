@@ -24,6 +24,7 @@ export interface MercuryConfig {
   identity: {
     name: string;
     owner: string;
+    creator?: string;
   };
   providers: {
     default: string;
@@ -73,6 +74,7 @@ export function getDefaultConfig(): MercuryConfig {
     identity: {
       name: getEnv('MERCURY_NAME', 'Mercury'),
       owner: getEnv('MERCURY_OWNER', ''),
+      creator: getEnv('MERCURY_CREATOR', ''),
     },
     providers: {
       default: getEnv('DEFAULT_PROVIDER', 'openai'),

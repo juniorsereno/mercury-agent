@@ -40,9 +40,17 @@ src/
 │   └── scheduler.ts     # Cron + heartbeat
 ├── capabilities/         # Agentic tools & permissions
 │   ├── permissions.ts    # Permission manager (read/write scope, shell blocklist)
-│   ├── registry.ts      # Registers all AI SDK tools
+│   ├── registry.ts      # Registers all AI SDK tools + skill/scheduler tools
 │   ├── filesystem/      # File ops: read, write, create, list, delete
-│   └── shell/           # Shell execution with blocklist
+│   ├── shell/           # Shell execution with blocklist
+│   ├── skills/          # Skill management tools
+│   │   ├── install-skill.ts
+│   │   ├── list-skills.ts
+│   │   └── use-skill.ts
+│   └── scheduler/       # Scheduling tools
+│       ├── schedule-task.ts
+│       ├── list-tasks.ts
+│       └── cancel-task.ts
 ├── memory/               # Persistence layer
 │   └── store.ts          # Short/long/episodic memory
 ├── providers/            # LLM APIs
@@ -52,9 +60,10 @@ src/
 │   └── registry.ts
 ├── soul/                 # Consciousness
 │   └── identity.ts       # Soul/persona/taste loader + guardrails
-├── skills/               # Modular abilities
-│   ├── types.ts
-│   └── loader.ts
+├── skills/               # Modular abilities (Agent Skills spec)
+│   ├── types.ts          # SkillMeta, SkillDiscovery, Skill types
+│   ├── loader.ts         # SKILL.md parser, progressive disclosure
+│   └── index.ts          # Barrel exports
 ├── types/                # Type definitions
 └── utils/                # Config, logger, tokens
 ```
@@ -111,6 +120,12 @@ When Mercury needs a scope it doesn't have:
 | `list_dir` | List directory contents | Read scope for path |
 | `delete_file` | Delete a file | Write scope, always confirms |
 | `run_command` | Execute shell command | Blocklist + approval list + scope |
+| `install_skill` | Install a skill from content or URL | No restriction |
+| `list_skills` | List installed skills | No restriction |
+| `use_skill` | Load and invoke a skill's instructions | No restriction |
+| `schedule_task` | Schedule a recurring cron task | Validates cron expression |
+| `list_scheduled_tasks` | List scheduled tasks | No restriction |
+| `cancel_scheduled_task` | Cancel a scheduled task | No restriction |
 
 ## Agent Lifecycle
 
@@ -130,6 +145,7 @@ All runtime data lives in `~/.mercury/` (not the project directory):
 | Soul files | `~/.mercury/soul/*.md` |
 | Memory | `~/.mercury/memory/` |
 | Skills | `~/.mercury/skills/` |
+| Schedules | `~/.mercury/schedules.yaml` |
 | Permissions | `~/.mercury/permissions.yaml` |
 
 ## Token Budget
@@ -150,3 +166,81 @@ All runtime data lives in `~/.mercury/` (not the project directory):
 - Typing indicator while processing
 - Proactive messages via heartbeat
 - `TELEGRAM_BOT_TOKEN` in .env or mercury.yaml
+
+## Skills System
+
+Mercury supports the Agent Skills specification. Skills are modular, installable instruction sets that extend Mercury's capabilities without code changes.
+
+### Skill Format
+
+Each skill is a directory under `~/.mercury/skills/` containing a `SKILL.md`:
+
+```
+~/.mercury/skills/
+├── daily-digest/
+│   └── SKILL.md       # Required: YAML frontmatter + markdown instructions
+├── code-review/
+│   ├── SKILL.md
+│   ├── scripts/       # Optional: executable scripts
+│   └── references/    # Optional: reference documents
+└── _template/
+    └── SKILL.md       # Seeded template for new skills
+```
+
+### SKILL.md Structure
+
+```markdown
+---
+name: daily-digest
+description: Send a daily summary of activity
+version: 0.1.0
+allowed-tools:
+  - read_file
+  - list_dir
+  - run_command
+---
+
+# Daily Digest
+
+Instructions for Mercury to follow when this skill is invoked...
+```
+
+### Progressive Disclosure
+
+- **Startup**: Only skill names + descriptions are loaded (token-efficient)
+- **Invocation**: Full skill instructions loaded on demand via `use_skill` tool
+- This keeps the system prompt small while making skills available
+
+### Skill Tools
+
+- `install_skill`: Install from markdown content or URL
+- `list_skills`: Show all installed skills
+- `use_skill`: Load and invoke skill instructions into agent context
+
+## Scheduler
+
+Mercury can schedule recurring tasks using cron expressions. Tasks persist to `~/.mercury/schedules.yaml` and are restored on startup.
+
+### Scheduled Task Fields
+
+| Field | Description |
+|---|---|
+| `id` | Unique task identifier |
+| `cron` | Standard 5-field cron expression |
+| `description` | Human-readable description |
+| `prompt` | Text prompt to send to agent when task fires |
+| `skill_name` | Optional: skill to invoke when task fires |
+| `createdAt` | ISO timestamp |
+
+### How Tasks Execute
+
+When a scheduled task fires:
+1. If `skill_name` is set, Mercury is prompted to invoke that skill via `use_skill`
+2. If `prompt` is set, Mercury processes it as an internal (non-channel) message
+3. Internal messages don't produce visible channel responses — they run silently in the agent loop
+
+### Scheduler Tools
+
+- `schedule_task`: Create a cron task with prompt or skill_name
+- `list_scheduled_tasks`: Show all scheduled tasks
+- `cancel_scheduled_task`: Remove a scheduled task

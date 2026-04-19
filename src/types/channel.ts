@@ -1,4 +1,4 @@
-export type ChannelType = 'cli' | 'telegram' | 'signal' | 'discord' | 'slack' | 'whatsapp';
+export type ChannelType = 'cli' | 'telegram' | 'internal' | 'signal' | 'discord' | 'slack' | 'whatsapp';
 
 export interface ChannelMessage {
   id: string;

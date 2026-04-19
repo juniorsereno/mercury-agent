@@ -1,23 +1,18 @@
-export interface SkillManifest {
+export interface SkillMeta {
   name: string;
-  version: string;
   description: string;
-  triggers: string[];
-  capabilities: string[];
+  version?: string;
+  'allowed-tools'?: string[];
+  'disable-model-invocation'?: boolean;
 }
 
-export interface Skill {
-  manifest: SkillManifest;
-  execute(input: SkillInput): Promise<SkillOutput>;
+export interface SkillDiscovery {
+  name: string;
+  description: string;
 }
 
-export interface SkillInput {
-  message: string;
-  context: Record<string, unknown>;
-}
-
-export interface SkillOutput {
-  response: string;
-  success: boolean;
-  metadata?: Record<string, unknown>;
+export interface Skill extends SkillMeta {
+  instructions: string;
+  scriptsDir?: string;
+  referencesDir?: string;
 }

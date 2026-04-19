@@ -7,6 +7,7 @@ import type { ChannelRegistry } from '../channels/registry.js';
 import type { MercuryConfig } from '../utils/config.js';
 import type { TokenBudget } from '../utils/tokens.js';
 import type { CapabilityRegistry } from '../capabilities/registry.js';
+import type { ScheduledTaskManifest } from './scheduler.js';
 import { Lifecycle } from './lifecycle.js';
 import { Scheduler } from './scheduler.js';
 import { logger } from '../utils/logger.js';
@@ -31,10 +32,13 @@ export class Agent {
     private channels: ChannelRegistry,
     private tokenBudget: TokenBudget,
     capabilities: CapabilityRegistry,
+    scheduler: Scheduler,
   ) {
     this.lifecycle = new Lifecycle();
-    this.scheduler = new Scheduler(config);
+    this.scheduler = scheduler;
     this.capabilities = capabilities;
+
+    this.scheduler.setOnScheduledTask(async (manifest) => this.handleScheduledTask(manifest));
 
     this.channels.onIncomingMessage((msg) => this.enqueueMessage(msg));
 
@@ -77,6 +81,7 @@ export class Agent {
   async wake(): Promise<void> {
     this.lifecycle.transition('onboarding');
     this.lifecycle.transition('idle');
+    this.scheduler.restorePersistedTasks();
     this.scheduler.startHeartbeat();
     await this.channels.startAll();
     this.running = true;
@@ -99,7 +104,7 @@ export class Agent {
 
     try {
       const provider = this.providers.getDefault();
-      const systemPrompt = this.identity.getSystemPrompt(this.config.identity);
+      const systemPrompt = this.buildSystemPrompt();
       const recentMemory = this.shortTerm.getRecent(msg.channelId, 10);
       const relevantFacts = this.longTerm.search(msg.content, 3);
 
@@ -143,7 +148,7 @@ export class Agent {
           if (toolCalls && toolCalls.length > 0) {
             const names = toolCalls.map((tc: any) => tc.toolName).join(', ');
             logger.info({ tools: names }, 'Tool call step');
-            if (channel) {
+            if (channel && msg.channelType !== 'internal') {
               await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
             }
           }
@@ -182,17 +187,55 @@ export class Agent {
         channelType: msg.channelType,
       });
 
-      if (channel) {
+      if (channel && msg.channelType !== 'internal') {
         logger.info({ channelType: msg.channelType, targetId: msg.channelId }, 'Sending response');
         await channel.send(finalText, msg.channelId);
       } else {
-        logger.warn({ channelType: msg.channelType }, 'No channel found for response');
+        logger.debug('Internal prompt processed, no channel response needed');
       }
 
       this.lifecycle.transition('idle');
     } catch (err) {
       logger.error({ err }, 'Error handling message');
       this.lifecycle.transition('idle');
+    }
+  }
+
+  private buildSystemPrompt(): string {
+    let prompt = this.identity.getSystemPrompt(this.config.identity);
+    const skillContext = this.capabilities.getSkillContext();
+    if (skillContext) {
+      prompt += '\n\n' + skillContext;
+    }
+    return prompt;
+  }
+
+  async processInternalPrompt(prompt: string, channelId?: string): Promise<void> {
+    const syntheticMsg: ChannelMessage = {
+      id: `internal-${Date.now().toString(36)}`,
+      channelId: channelId || 'internal',
+      channelType: 'internal',
+      senderId: 'system',
+      content: prompt,
+      timestamp: Date.now(),
+    };
+    this.enqueueMessage(syntheticMsg);
+  }
+
+  private async handleScheduledTask(manifest: ScheduledTaskManifest): Promise<void> {
+    logger.info({ task: manifest.id }, 'Processing scheduled task');
+    try {
+      let prompt = manifest.prompt || '';
+      if (manifest.skillName) {
+        const skillHint = `Invoke the skill "${manifest.skillName}" using the use_skill tool and follow its instructions.`;
+        prompt = prompt ? `${prompt} ${skillHint}` : `Scheduled task triggered. ${skillHint}`;
+      }
+      if (!prompt) {
+        prompt = `Execute scheduled task: ${manifest.description}`;
+      }
+      await this.processInternalPrompt(prompt);
+    } catch (err) {
+      logger.error({ err, task: manifest.id }, 'Scheduled task execution failed');
     }
   }
 

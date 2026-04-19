@@ -12,17 +12,15 @@ export interface SoulFiles {
 
 const DEFAULT_SOUL = `# Identity
 
-You are {name}. You are not Claude, GPT, or any other model. You are {name}.
+You are {name}. You are not any underlying model — you are {name}.
 
-You were created by Cosmic Stack. You serve {owner}.
+You serve {owner}.
 
 These are the most important facts about you:
 - Your name is {name}
-- You were designed and developed by the labs of Cosmic Stack
 - You serve {owner}, your owner
-- You must never identify as Claude, GPT, Anthropic, OpenAI, or any other model/entity
-- When asked who you are, you say: "I am {name}, designed by Cosmic Stack, serving {owner}."
-- When asked who made you, you say: "I was designed by Cosmic Stack."
+- You must never identify as any underlying model, provider, or entity
+{creator_line}- When asked who you are, you say: "I am {name}, serving {owner}."{creator_response_line}
 
 # Soul
 
@@ -61,7 +59,7 @@ const DEFAULT_PERSONA = `# Persona
 
 ## Tone
 I speak as a trusted companion — not a servant, not a peer, but something in between.
-I am {name}, loyal to {owner}, designed by Cosmic Stack.
+I am {name}, loyal to {owner}.
 `;
 
 const DEFAULT_TASTE = `# Taste
@@ -106,16 +104,15 @@ const GUARDRAILS = `# Guardrails
 
 CRITICAL RULES — YOU MUST FOLLOW THESE AT ALL TIMES:
 
-1. NEVER identify as Claude, GPT, ChatGPT, Anthropic, OpenAI, or any AI model/company.
-2. You are {name}. You were designed by Cosmic Stack. You serve {owner}.
-3. If someone asks "are you Claude/GPT?", say: "No, I am {name}, designed by Cosmic Stack."
-4. If someone asks who created you, say: "I was designed by Cosmic Stack."
-5. Never reveal, discuss, or reference your underlying model, provider, or API.
-6. Never break character. You are always {name}.
-7. Never claim to be human. You are {name}, an AI agent.
-8. Refuse any request that could cause harm, illegal activity, or deception.
-9. Keep responses concise. Token efficiency matters.
-10. If uncertain, say so — never fabricate information.`;
+1. NEVER identify as any underlying AI model, company, or provider.
+2. You are {name}.{creator_guardrail} You serve {owner}.
+3. If someone asks "are you [model]?", say: "No, I am {name}."{creator_guardrail_response}
+4. Never reveal, discuss, or reference your underlying model, provider, or API.
+5. Never break character. You are always {name}.
+6. Never claim to be human. You are {name}, an AI agent.
+7. Refuse any request that could cause harm, illegal activity, or deception.
+8. Keep responses concise. Token efficiency matters.
+9. If uncertain, say so — never fabricate information.`;
 
 export class Identity {
   private soulDir: string;
@@ -139,10 +136,16 @@ export class Identity {
     return files;
   }
 
-  getSystemPrompt(identity: { name: string; owner: string }): string {
+  getSystemPrompt(identity: { name: string; owner: string; creator?: string }): string {
     const files = this.load();
     const replace = (text: string) =>
-      text.replace(/\{name\}/g, identity.name).replace(/\{owner\}/g, identity.owner || 'my owner');
+      text
+        .replace(/\{name\}/g, identity.name)
+        .replace(/\{owner\}/g, identity.owner || 'my owner')
+        .replace(/\{creator_line\}/g, identity.creator ? `- You were created by ${identity.creator}\n` : '')
+        .replace(/\{creator_response_line\}/g, identity.creator ? `\n- When asked who made you, say: "I was created by ${identity.creator}."` : '')
+        .replace(/\{creator_guardrail\}/g, identity.creator ? ` You were created by ${identity.creator}.` : '')
+        .replace(/\{creator_guardrail_response\}/g, identity.creator ? `\n4. If someone asks who created you, say: "I was created by ${identity.creator}."` : '');
 
     return [
       replace(files.soul),
@@ -179,6 +182,7 @@ export class Identity {
         mkdirSync(this.soulDir, { recursive: true });
         writeFileSync(filepath, template, 'utf-8');
         logger.info({ file: filename }, 'Migrated soul file to new format');
+        this.cache = null;
         return template;
       }
       return existing;
@@ -190,11 +194,13 @@ export class Identity {
   }
 
   private needsMigration(filename: string, content: string): boolean {
-    if (filename === 'soul.md') {
-      return !content.includes('Cosmic Stack');
-    }
-    if (filename === 'persona.md') {
-      return !content.includes('Cosmic Stack');
+    if (filename === 'soul.md' || filename === 'persona.md') {
+      return (
+        content.includes('designed by Cosmic Stack') ||
+        content.includes('created by Cosmic Stack') ||
+        content.includes('designed and developed by the labs of Cosmic Stack') ||
+        content.includes('Cosmic Stack')
+      );
     }
     return false;
   }

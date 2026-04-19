@@ -7,10 +7,12 @@ import { Identity } from './soul/identity.js';
 import { ShortTermMemory, LongTermMemory, EpisodicMemory } from './memory/store.js';
 import { ProviderRegistry } from './providers/registry.js';
 import { Agent } from './core/agent.js';
+import { Scheduler } from './core/scheduler.js';
 import { ChannelRegistry } from './channels/registry.js';
 import { CLIChannel } from './channels/cli.js';
 import { TokenBudget } from './utils/tokens.js';
 import { CapabilityRegistry } from './capabilities/registry.js';
+import { SkillLoader } from './skills/loader.js';
 
 function hr() {
   console.log(chalk.dim('─'.repeat(50)));
@@ -22,6 +24,22 @@ function banner() {
   console.log(chalk.cyan('  ╠╦╝├┤  │ ││  │├┤ '));
   console.log(chalk.cyan('  ╩╚═└─┘ ┴ ┴┴─┘└─┘'));
   console.log(chalk.dim('     v0.1.0 — an AI agent for personal tasks'));
+  console.log(chalk.dim('     by Cosmic Stack — mercury.cosmicstack.org'));
+  console.log('');
+}
+
+function splashScreen() {
+  console.log('');
+  console.log(chalk.cyan('  ╦═╗┌─┐┌┬┐┬┬  ┬┌─┐'));
+  console.log(chalk.cyan('  ╠╦╝├┤  │ ││  │├┤ '));
+  console.log(chalk.cyan('  ╩╚═└─┘ ┴ ┴┴─┘└─┘'));
+  console.log('');
+  console.log(chalk.dim('     ─────────────────────────────────────'));
+  console.log(chalk.white('     M E R C U R Y'));
+  console.log(chalk.dim('     ─────────────────────────────────────'));
+  console.log(chalk.dim('     an AI agent for personal tasks'));
+  console.log(chalk.cyan('     by Cosmic Stack'));
+  console.log(chalk.dim('     mercury.cosmicstack.org'));
   console.log('');
 }
 
@@ -36,7 +54,7 @@ async function ask(prompt: string): Promise<string> {
 }
 
 async function onboarding(): Promise<void> {
-  banner();
+  splashScreen();
   console.log(chalk.yellow('  First run detected — let\'s set you up.'));
   hr();
   console.log('');
@@ -52,6 +70,8 @@ async function onboarding(): Promise<void> {
 
   const agentName = await ask(chalk.white(`  Agent name [${config.identity.name}]: `));
   if (agentName) config.identity.name = agentName;
+
+  config.identity.creator = 'Cosmic Stack';
 
   hr();
   console.log('');
@@ -97,8 +117,10 @@ async function onboarding(): Promise<void> {
   console.log(chalk.green(`  ✓ Soul files seeded in ${home}/soul/`));
   console.log(chalk.green(`  ✓ Memory stored in ${home}/memory/`));
   console.log(chalk.green(`  ✓ Permissions seeded in ${home}/permissions.yaml`));
+  console.log(chalk.green(`  ✓ Skills directory ready in ${home}/skills/`));
   console.log('');
   console.log(chalk.cyan(`  ${config.identity.name} is ready. Run \`mercury start\` to begin.`));
+  console.log(chalk.dim('  mercury.cosmicstack.org'));
   console.log('');
 }
 
@@ -121,9 +143,11 @@ async function runAgent(): Promise<void> {
   const available = providers.listAvailable();
   console.log(chalk.dim(`  Providers: ${available.join(', ')}`));
 
-  const capabilities = new CapabilityRegistry();
-  const toolNames = capabilities.getToolNames();
-  console.log(chalk.dim(`  Tools: ${toolNames.join(', ')}`));
+  const skillLoader = new SkillLoader();
+  const skills = skillLoader.discover();
+  console.log(chalk.dim(`  Skills: ${skills.length > 0 ? skills.map(s => s.name).join(', ') : 'none installed'}`));
+
+  const scheduler = new Scheduler(config);
 
   const identity = new Identity();
   const shortTerm = new ShortTermMemory(config);
@@ -131,9 +155,10 @@ async function runAgent(): Promise<void> {
   const episodic = new EpisodicMemory(config);
 
   const channels = new ChannelRegistry(config);
+  const capabilities = new CapabilityRegistry(skillLoader, scheduler);
 
   const agent = new Agent(
-    config, providers, identity, shortTerm, longTerm, episodic, channels, tokenBudget, capabilities,
+    config, providers, identity, shortTerm, longTerm, episodic, channels, tokenBudget, capabilities, scheduler,
   );
 
   await agent.birth();
@@ -148,8 +173,14 @@ async function runAgent(): Promise<void> {
   }
 
   const activeCh = channels.getActiveChannels();
+  const toolNames = capabilities.getToolNames();
   console.log(chalk.dim(`  Channels: ${activeCh.join(', ')}`));
+  console.log(chalk.dim(`  Tools: ${toolNames.join(', ')}`));
   console.log(chalk.dim(`  Permissions: ${getMercuryHome()}/permissions.yaml`));
+  console.log(chalk.dim(`  Schedules: ${getMercuryHome()}/schedules.yaml`));
+  if (config.identity.creator) {
+    console.log(chalk.dim(`  Creator: ${config.identity.creator}`));
+  }
   hr();
   console.log('');
   console.log(chalk.green(`  ${name} is live. Type a message and press Enter.`));
@@ -207,11 +238,17 @@ program
   .action(() => {
     const config = loadConfig();
     const home = getMercuryHome();
+    const skillLoader = new SkillLoader();
+    const skills = skillLoader.discover();
     banner();
     console.log(`  Name:     ${chalk.cyan(config.identity.name)}`);
     console.log(`  Owner:    ${chalk.white(config.identity.owner || '(not set)')}`);
+    if (config.identity.creator) {
+      console.log(`  Creator:  ${chalk.white(config.identity.creator)}`);
+    }
     console.log(`  Provider: ${chalk.white(config.providers.default)}`);
     console.log(`  Telegram: ${config.channels.telegram.enabled ? chalk.green('enabled') : chalk.dim('disabled')}`);
+    console.log(`  Skills:   ${skills.length > 0 ? chalk.green(skills.map(s => s.name).join(', ')) : chalk.dim('none')}`);
     console.log(`  Budget:   ${chalk.white(config.tokens.dailyBudget)} tokens/day`);
     console.log(`  Setup:    ${isSetupComplete() ? chalk.green('complete') : chalk.red('not done')}`);
     console.log(`  Home:     ${chalk.dim(home)}`);

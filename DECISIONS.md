@@ -37,3 +37,15 @@
 - **Context**: Agent personality needs to be editable, versionable, and token-efficient.
 - **Decision**: Four separate markdown files: soul.md, persona.md, taste.md, heartbeat.md. Only soul + persona injected every request; taste + heartbeat selectively.
 - **Consequence**: ~350 token baseline for identity. Owner can edit personality without code changes.
+
+## ADR-007: Agent Skills specification
+
+- **Context**: Skills need to be modular, installable at runtime, and token-efficient.
+- **Decision**: Adopt the Agent Skills spec (agentskills.io). Skills use `SKILL.md` with YAML frontmatter + markdown instructions. Stored in `~/.mercury/skills/`. Progressive disclosure: only name+description loaded at startup; full instructions loaded on invocation.
+- **Consequence**: Skills are human-readable markdown, no code required. Token budget stays low. Install by pasting content or URL.
+
+## ADR-008: Scheduler with YAML persistence
+
+- **Context**: Mercury needs to set reminders, run periodic tasks, and trigger skills on a schedule.
+- **Decision**: Expose `schedule_task`, `list_scheduled_tasks`, `cancel_scheduled_task` as AI-callable tools. Persist scheduled tasks to `~/.mercury/schedules.yaml`. Restore on startup. Tasks fire as internal (non-channel) messages through the agent loop.
+- **Consequence**: Mercury can autonomously schedule work. Tasks survive restarts. Internal execution keeps scheduled tasks invisible to channels unless the agent explicitly sends output.
