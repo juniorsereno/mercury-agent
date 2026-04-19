@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import readline from 'node:readline';
 import chalk from 'chalk';
+import figlet from 'figlet';
 import { loadConfig, saveConfig, isSetupComplete, getMercuryHome, ensureCreatorField } from './utils/config.js';
 import { logger } from './utils/logger.js';
 import { Identity } from './soul/identity.js';
@@ -20,19 +21,22 @@ function hr() {
 
 function banner() {
   console.log('');
-  console.log(chalk.cyan('  ═════════════════════════════════════'));
-  console.log(chalk.bold.white('       M E R C U R Y'));
-  console.log(chalk.cyan('  ═════════════════════════════════════'));
-  console.log(chalk.dim('  v0.1.0 — an AI agent for personal tasks'));
-  console.log(chalk.dim('  by Cosmic Stack — mercury.cosmicstack.org'));
+  const art = figlet.textSync('MERCURY', { font: 'Slant', horizontalLayout: 'default' });
+  for (const line of art.split('\n')) {
+    if (line.trim()) console.log(chalk.bold.cyan(`  ${line}`));
+  }
+  console.log('');
+  console.log(chalk.white('  an AI agent for personal tasks'));
+  console.log(chalk.dim('  v0.1.0 · by Cosmic Stack · mercury.cosmicstack.org'));
   console.log('');
 }
 
 function splashScreen() {
   console.log('');
-  console.log(chalk.cyan('  ═════════════════════════════════════'));
-  console.log(chalk.bold.white('       M E R C U R Y'));
-  console.log(chalk.cyan('  ═════════════════════════════════════'));
+  const art = figlet.textSync('MERCURY', { font: 'Slant', horizontalLayout: 'default' });
+  for (const line of art.split('\n')) {
+    if (line.trim()) console.log(chalk.bold.cyan(`  ${line}`));
+  }
   console.log('');
   console.log(chalk.dim('  an AI agent for personal tasks'));
   console.log(chalk.cyan('  by Cosmic Stack'));
