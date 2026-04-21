@@ -197,6 +197,12 @@ MIT © [Cosmic Stack](https://github.com/cosmicstack-labs)
 
 ---
 
+## Disclaimer
+
+**This is AI - it can break sometimes, please use this at your own risk.**
+
+---
+
 ## Suggestions and Contributions
 
 For suggestions, contributions, or any inquiries, please reach out to us at [support@cosmicstack.org](mailto:support@cosmicstack.org).
