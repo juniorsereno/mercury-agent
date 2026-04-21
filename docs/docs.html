@@ -709,14 +709,16 @@
       <ul>
         <li><strong>GitHub username</strong> — your GitHub username (used for commit attribution)</li>
         <li><strong>GitHub email</strong> — the email tied to your GitHub account</li>
-        <li><strong>GitHub PAT</strong> — a fine-grained Personal Access Token with repo scope</li>
+        <li><strong>GitHub PAT</strong> — a Personal Access Token with repo scope (fine-grained or classic)</li>
       </ul>
       <p>Press <strong>Enter</strong> on any field to keep its current value. When the PAT is set, you'll see:</p>
       <div class="terminal-inline">
         <code>✓ GitHub tools registered (5)</code>
       </div>
 
-      <h3>Creating a Fine-Grained PAT</h3>
+      <h3>Creating a PAT</h3>
+      <p>Mercury supports both <strong>fine-grained</strong> and <strong>classic</strong> Personal Access Tokens.</p>
+      <h4>Option A: Fine-Grained PAT (recommended)</h4>
       <ol>
         <li>Go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank"
             rel="noopener">github.com/settings/personal-access-tokens/new</a></li>
@@ -725,11 +727,19 @@
           repos</li>
         <li>Under <strong>Permissions → Repository permissions</strong>, grant:
           <ul>
-            <li><strong>Contents</strong> — Read and write (for commits)</li>
+            <li><strong>Contents</strong> — Read and write</li>
             <li><strong>Pull requests</strong> — Read and write</li>
             <li><strong>Issues</strong> — Read and write</li>
           </ul>
         </li>
+        <li>Click <strong>Generate token</strong> and copy it immediately</li>
+      </ol>
+      <h4>Option B: Classic PAT</h4>
+      <ol>
+        <li>Go to <a href="https://github.com/settings/tokens/new" target="_blank"
+            rel="noopener">github.com/settings/tokens/new</a></li>
+        <li>Give it a name (e.g. <code>mercury-agent</code>) and set an expiration</li>
+        <li>Select the <strong>repo</strong> scope (full control of private repositories)</li>
         <li>Click <strong>Generate token</strong> and copy it immediately</li>
       </ol>
 
