@@ -5,18 +5,18 @@ import type { PermissionManager } from '../permissions.js';
 
 export function createApproveScopeTool(permissions: PermissionManager) {
   return tool({
-    description: 'Request user approval to add a directory to the allowed filesystem scopes. Use this when a file operation fails due to scope permissions. The user will see an approval prompt (inline keyboard on Telegram, readline on CLI). If approved, the scope is added permanently.',
+    description: 'Request user approval to access a directory outside current scopes. Use this when a file tool returns a permission denied error. The user gets an approval prompt (Allow/Always/Deny buttons on Telegram, yes/always/no on CLI). "Allow" grants session-only access. "Always" persists to disk. After approval, retry the original file operation.',
     parameters: z.object({
-      path: z.string().describe('The directory path to add to allowed scopes'),
+      path: z.string().describe('The directory path to request access to'),
       mode: z.enum(['read', 'write']).describe('The access mode needed'),
     }),
     execute: async ({ path, mode }) => {
       const resolved = resolve(path);
       const result = await permissions.requestScopeExternal(resolved, mode);
       if (result.allowed) {
-        return `Access approved for ${mode} access to ${resolved}`;
+        return `Access approved for ${mode} access to ${resolved}. You can now retry the file operation.`;
       }
-      return `Access denied for ${mode} access to ${resolved}`;
+      return `Access denied for ${mode} access to ${resolved}. The user did not approve scope access.`;
     },
   });
 }

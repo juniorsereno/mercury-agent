@@ -132,6 +132,8 @@ export class PermissionManager {
   private pendingApprovals: Set<string> = new Set();
   private currentChannelType: string = 'cli';
 
+  private tempScopes: FileScope[] = [];
+
   constructor() {
     this.cwd = process.cwd();
     this.manifest = this.load();
@@ -239,6 +241,7 @@ export class PermissionManager {
 
     const resolved = resolve(path);
     const scope = this.findScope(resolved);
+    const tempScope = this.findTempScope(resolved);
 
     if (scope) {
       if (mode === 'read' && scope.read) return { allowed: true };
@@ -246,7 +249,13 @@ export class PermissionManager {
       return { allowed: false, reason: `Permission denied: ${mode} access to ${path} (scope has ${mode}=false)` };
     }
 
-    return await this.requestScope(resolved, mode);
+    if (tempScope) {
+      if (mode === 'read' && tempScope.read) return { allowed: true };
+      if (mode === 'write' && tempScope.write) return { allowed: true };
+      return { allowed: false, reason: `Permission denied: ${mode} access to ${path}` };
+    }
+
+    return { allowed: false, reason: `Permission denied for ${mode} access to ${path}` };
   }
 
   async checkShellCommand(command: string): Promise<{ allowed: boolean; reason?: string; needsApproval: boolean }> {
@@ -284,7 +293,7 @@ export class PermissionManager {
       if (hasPathTraversal) {
         const scopeCheck = await this.checkFsAccess(hasPathTraversal, 'write');
         if (!scopeCheck.allowed) {
-          return { allowed: false, reason: scopeCheck.reason, needsApproval: true };
+          return { allowed: false, reason: `No permission to access ${hasPathTraversal}. Use approve_scope tool with path="${hasPathTraversal}" and mode="write" to request access.`, needsApproval: false };
         }
       }
     }
@@ -365,10 +374,6 @@ export class PermissionManager {
   }
 
   async requestScopeExternal(path: string, mode: 'read' | 'write'): Promise<{ allowed: boolean; reason?: string }> {
-    return this.requestScope(path, mode);
-  }
-
-  private async requestScope(path: string, mode: 'read' | 'write'): Promise<{ allowed: boolean; reason?: string }> {
     if (!this.askHandler) {
       return { allowed: false, reason: `Permission denied for ${mode} access to ${path}` };
     }
@@ -381,11 +386,28 @@ export class PermissionManager {
       return { allowed: true };
     }
 
-    if (response === 'yes' || response === 'y') {
+    if (response === 'yes') {
+      this.addTempScope(path, mode === 'read', mode === 'write');
       return { allowed: true };
     }
 
     return { allowed: false, reason: `Permission denied for ${mode} access to ${path}` };
+  }
+
+  addTempScope(path: string, read: boolean, write: boolean): void {
+    const resolved = resolve(path);
+    this.tempScopes.push({ path: resolved, read, write });
+    logger.info({ path: resolved, read, write }, 'Temp permission scope added (session only)');
+  }
+
+  private findTempScope(resolvedPath: string): FileScope | undefined {
+    for (const scope of this.tempScopes) {
+      const scopeResolved = resolve(scope.path.replace(/^~/, homedir()));
+      if (resolvedPath === scopeResolved || resolvedPath.startsWith(scopeResolved + sep)) {
+        return scope;
+      }
+    }
+    return undefined;
   }
 
   private matchPattern(command: string, pattern: string): boolean {
