@@ -1,46 +1,27 @@
-# Release v0.4.0
+# Release v0.4.1
 
-## ☿ Mercury Agent v0.4.0
+## ☿ Mercury Agent v0.4.1
 
-**Persistent working directory, Ollama support, Telegram messaging, and more.**
+**Smarter agent context, co-author fix, and loop detection.**
 
-### Highlights
+### What's Changed
 
-- **`cd` tool** — Change directories persistently. All subsequent file, shell, and git operations use the new working directory. No more lost `cd` between commands.
-- **Relative path support** — All 8 filesystem tools and all 6 git tools now resolve relative paths against the current working directory instead of `process.cwd()`.
-- **`run_command` learns `cd`** — Running `cd /some/path` or `cd /some/path && ls` in `run_command` automatically updates the persistent working directory.
-- **Ollama provider** — Run Mercury fully locally with Ollama. Added during onboarding with model selection.
-- **Telegram paired messaging** — New `send_message` tool lets the agent proactively send messages to the paired Telegram chat.
-- **Improved onboarding** — Relaxed provider setup, better Telegram guidance, Ollama configuration flow.
+- **Agent context enrichment** — Every request now includes `Platform` and `Working directory` in the system prompt, so the LLM knows what OS it's on and where it's working. Prevents the "trying `/home/zayd` on Windows" confusion.
+- **GitHub companion awareness** — When GitHub tools are active, the system prompt now explains when to use `git_commit` + `git_push` vs. `github_api` Contents API, so the agent doesn't fumble between approaches.
+- **Co-author injection for GitHub API** — `github_api` now automatically injects `Co-authored-by: Mercury <mercury@cosmicstack.org>` into all content creation/update operations (`PUT /repos/:owner/:repo/contents/:path`). Previously, only `git_commit` had the co-author trailer — API-created files were missing it.
+- **Loop detection circuit breaker** — New `ToolCallLoopDetector` tracks consecutive tool calls. If the same tool+params is called 3+ times in a row, a system warning is injected telling the LLM to try a different approach. Prevents the infinite `approve_scope` / `list_dir` death spirals that burned through token budgets.
+- **`github_api` description overhaul** — The tool description now explicitly documents Contents API operations (push files, delete files) and when to use the API vs. git CLI, so the LLM makes smarter choices from the start.
 
-### What's New
+### Bug Fixes
 
-- `cd` tool — persistent directory changes across all tool calls
-- `currentCwd` state in `CapabilityRegistry` with `getCwd()`/`setCwd()`
-- `send_message` capability for paired Telegram chats
-- Ollama provider (`ollama-ai-provider`) with onboarding setup
-- Enhanced Telegram channel with paired messaging support
+- LLM no longer blind to the current working directory or platform when making tool calls
+- GitHub API file pushes now correctly show Mercury as co-author in GitHub's commit history
+- Agent no longer loops on failing permission/approval calls until token budget exhaustion
 
-### Fixes & Improvements
+### Migration from v0.4.0
 
-- All filesystem tools (`read_file`, `write_file`, `create_file`, `list_dir`, `delete_file`, `edit_file`, `send_file`, `approve_scope`) now resolve relative paths against current working directory
-- All git tools (`git_status`, `git_diff`, `git_log`, `git_add`, `git_commit`, `git_push`) now use `cwd: getCwd()` in `execSync`
-- `run_command` uses persistent `cwd` and auto-detects directory changes
-- Improved provider onboarding flow with Ollama support
-- Enhanced `.env.example` with all available configuration options
-- Updated documentation with new tools and provider setup
-
-### Migration from v0.3.x
-
-No configuration changes required. The `cd` tool is automatically registered. Existing relative paths in tool calls will now resolve against the persistent working directory (defaults to `process.cwd()` on startup, same as before).
-
-### Credits
-
-- Persistent working directory implementation — @salmanqureshi
-- Ollama provider & onboarding improvements — @salmanqureshi
-- Telegram paired messaging — @salmanqureshi
-- Social media & documentation updates — reviewed by PR #3 contributors
+No configuration changes required. All improvements are in agent behavior and tool descriptions.
 
 ---
 
-**Full Changelog**: https://github.com/cosmicstack-labs/mercury-agent/compare/v0.3.4...v0.4.0
+**Full Changelog**: https://github.com/cosmicstack-labs/mercury-agent/compare/v0.4.0...v0.4.1

@@ -12,6 +12,56 @@ import { Lifecycle } from './lifecycle.js';
 import { Scheduler } from './scheduler.js';
 import { logger } from '../utils/logger.js';
 
+class ToolCallLoopDetector {
+  private recentCalls: Array<{ tool: string; params: string }> = [];
+  private maxEntries = 10;
+
+  record(toolName: string, params: Record<string, any>): void {
+    const paramsKey = JSON.stringify(params).slice(0, 100);
+    this.recentCalls.push({ tool: toolName, params: paramsKey });
+    if (this.recentCalls.length > this.maxEntries) {
+      this.recentCalls.shift();
+    }
+  }
+
+  detect(): { tool: string; count: number } | null {
+    if (this.recentCalls.length < 3) return null;
+
+    const last = this.recentCalls[this.recentCalls.length - 1];
+    let consecutiveCount = 0;
+    for (let i = this.recentCalls.length - 1; i >= 0; i--) {
+      if (this.recentCalls[i].tool === last.tool && this.recentCalls[i].params === last.params) {
+        consecutiveCount++;
+      } else {
+        break;
+      }
+    }
+
+    if (consecutiveCount >= 3) {
+      return { tool: last.tool, count: consecutiveCount };
+    }
+
+    const lastTool = last.tool;
+    let toolCount = 0;
+    for (let i = this.recentCalls.length - 1; i >= 0; i--) {
+      if (this.recentCalls[i].tool === lastTool) {
+        toolCount++;
+      } else {
+        break;
+      }
+    }
+    if (toolCount >= 4) {
+      return { tool: lastTool, count: toolCount };
+    }
+
+    return null;
+  }
+
+  reset(): void {
+    this.recentCalls = [];
+  }
+}
+
 const MAX_STEPS = 10;
 
 export class Agent {
@@ -188,6 +238,32 @@ export class Agent {
 
       const messages: any[] = [];
 
+      const recentSteps = this.shortTerm.getRecent(msg.channelId, 4);
+      let loopWarning: string | null = null;
+      if (recentSteps.length >= 3) {
+        const toolCallPattern = /\[Using: (.+?)\]/g;
+        const toolCalls: string[] = [];
+        for (const m of recentSteps) {
+          if (m.role === 'assistant') {
+            let match;
+            while ((match = toolCallPattern.exec(m.content)) !== null) {
+              toolCalls.push(match[1]);
+            }
+          }
+        }
+        if (toolCalls.length >= 3) {
+          const last3 = toolCalls.slice(-3);
+          if (last3[0] === last3[1] && last3[1] === last3[2]) {
+            loopWarning = `[SYSTEM WARNING] You have called ${last3[0]} 3+ times in a row with the same result. Stop repeating this call. Try a different approach — if you're failing on permissions, try a different path. If you're failing on git push auth, use github_api with PUT /repos/{owner}/{repo}/contents/{path} to push files directly through the API.`;
+          }
+        }
+      }
+
+      if (loopWarning) {
+        messages.push({ role: 'user', content: loopWarning });
+        messages.push({ role: 'assistant', content: 'Understood. I will try a different approach.' });
+      }
+
       if (relevantFacts.length > 0) {
         messages.push({
           role: 'user',
@@ -222,6 +298,7 @@ export class Agent {
       let usedProvider: { name: string; model: string } | null = null;
       let lastError: any = null;
       let streamedText = '';
+      const loopDetector = new ToolCallLoopDetector();
 
       const canStream = msg.channelType === 'cli' || (msg.channelType === 'telegram' && this.telegramStreaming);
 
@@ -240,6 +317,13 @@ export class Agent {
                 if (toolCalls && toolCalls.length > 0) {
                   const names = toolCalls.map((tc: any) => tc.toolName).join(', ');
                   logger.info({ tools: names }, 'Tool call step');
+                  for (const tc of toolCalls) {
+                    loopDetector.record(tc.toolName, tc.args as Record<string, any>);
+                  }
+                  const loop = loopDetector.detect();
+                  if (loop) {
+                    logger.warn({ tool: loop.tool, count: loop.count }, 'Tool call loop detected');
+                  }
                   await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
                 }
               },
@@ -282,6 +366,13 @@ export class Agent {
                 if (toolCalls && toolCalls.length > 0) {
                   const names = toolCalls.map((tc: any) => tc.toolName).join(', ');
                   logger.info({ tools: names }, 'Tool call step');
+                  for (const tc of toolCalls) {
+                    loopDetector.record(tc.toolName, tc.args as Record<string, any>);
+                  }
+                  const loop = loopDetector.detect();
+                  if (loop) {
+                    logger.warn({ tool: loop.tool, count: loop.count }, 'Tool call loop detected');
+                  }
                   if (channel && msg.channelType !== 'internal') {
                     await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
                   }
@@ -385,16 +476,35 @@ export class Agent {
     if (this.tokenBudget.getUsagePercentage() > 70) {
       prompt += '\nBe concise to conserve tokens.';
     }
+
+    prompt += `\n\nEnvironment:\n- Platform: ${process.platform}\n- Working directory: ${this.capabilities.getCwd()}`;
+
     const toolNames = this.capabilities.getToolNames();
     const githubTools = ['create_pr', 'review_pr', 'list_issues', 'create_issue', 'github_api'];
     const hasGitHub = githubTools.some(t => toolNames.includes(t));
     if (hasGitHub) {
-      let githubHint = '\n\nGitHub companion is active. You can create pull requests, review PRs, manage issues, and use the GitHub API.';
+      let githubHint = '\n\nGitHub companion is active.';
       const { defaultOwner, defaultRepo } = this.config.github;
       if (defaultOwner && defaultRepo) {
         githubHint += ` Default repo: ${defaultOwner}/${defaultRepo}. Use this when the user doesn't specify a repo.`;
       }
-      githubHint += ' When the user says "create a PR", use create_pr. When they ask about issues, use list_issues or create_issue. When they ask to review a PR, use review_pr. Always specify owner and repo parameters.';
+
+      githubHint += `
+
+Available GitHub tools and when to use them:
+- git_add, git_commit, git_push: LOCAL git operations (stage, commit, push to a remote you have SSH/auth access to). All commits include "Co-authored-by: Mercury <mercury@cosmicstack.org>".
+- create_pr: Create a pull request on GitHub. The head branch must already exist on the remote.
+- review_pr: Get PR details and optionally post a review comment.
+- list_issues, create_issue: Browse and file issues.
+- github_api: Raw GitHub API access. IMPORTANT USE CASES:
+  - Push files directly to GitHub via PUT /repos/{owner}/{repo}/contents/{path} when git push fails due to auth. The body must include "message" and "content" (base64-encoded file content). This creates a commit on GitHub with Mercury as co-author.
+  - Delete files via DELETE /repos/{owner}/{repo}/contents/{path} with a "message" and "sha" in the body.
+  - Any other GitHub API operation not covered by the other tools.
+
+When the user asks to "push to GitHub" or "upload files" and git push fails, use github_api with PUT /repos/{owner}/{repo}/contents/{path} to push content directly through the API. This bypasses local git entirely.
+
+Always specify owner and repo parameters on GitHub tools. The user's GitHub username is ${this.config.github.username || 'not set'}.'`;
+
       prompt += githubHint;
     }
     return prompt;
