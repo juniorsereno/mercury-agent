@@ -4,9 +4,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mercury Documentation — Installation, Commands, and Daemon Mode</title>
+  <title>Mercury Documentation — Installation, Providers, Telegram, and Daemon Mode</title>
   <meta name="description"
-    content="Complete documentation for Mercury AI agent. Installation, CLI commands, daemon mode, in-chat commands, configuration, and platform-specific service setup.">
+    content="Complete documentation for Mercury AI agent. Installation, CLI commands, daemon mode, Telegram pairing, provider configuration, in-chat commands, and platform-specific service setup.">
   <meta name="author" content="Cosmic Stack">
   <meta name="robots" content="index, follow">
   <meta name="theme-color" content="#0a0a0a">
@@ -309,6 +309,7 @@
         <a href="#platform-guide">Platform Guide</a>
         <div class="sidebar-heading">Integrations</div>
         <a href="#github-companion">GitHub Companion</a>
+        <a href="#telegram">Telegram</a>
         <div class="sidebar-heading">Reference</div>
         <a href="#tools">Built-in Tools</a>
         <a href="#configuration">Configuration</a>
@@ -339,6 +340,8 @@
         <li><strong>LLM providers</strong> — choose one or more: DeepSeek, OpenAI, Anthropic, Grok, Ollama Cloud, or Ollama Local</li>
         <li><strong>Model selection</strong> — after each valid key, Mercury fetches recommended chat models and lets you choose a default</li>
         <li><strong>Telegram bot token</strong> — optional, for remote access in private 1:1 chats</li>
+        <li><strong>LLM API keys</strong> — at least one: DeepSeek, OpenAI, Anthropic, Grok, or Ollama</li>
+        <li><strong>Telegram bot token</strong> — optional, for remote access</li>
       </ul>
       <p>Provider keys are validated by format and then by fetching available models. If model discovery fails, Mercury asks you to re-enter the key instead of accepting random text.</p>
       <p>If you enable Telegram during first-time setup, Mercury starts a temporary pairing flow: send <code>/start</code> to your bot in Telegram, copy the pairing code you receive there, then paste that code into the CLI to finish setup.</p>
@@ -897,6 +900,101 @@
           any other credential: don't commit it, don't share it, and rotate the token if you suspect it's compromised.</p>
       </div>
 
+      <h2 id="telegram">Telegram</h2>
+      <p>Mercury connects to Telegram via a bot token, providing a mobile-first interface with streaming, file uploads,
+        and inline approval keyboards.</p>
+
+      <h3>Pairing</h3>
+      <p>Mercury uses a <strong>single-owner pairing model</strong>. Only one Telegram account can be paired to a Mercury
+        instance at a time. This ensures your agent only responds to you.</p>
+
+      <div class="callout" style="border-left-color: var(--cyan); background: rgba(0, 212, 255, 0.06);">
+        <div class="callout-title">Initial message only</div>
+        <p>When the bot is <strong>not yet paired</strong>, only the <code>/start</code> or <code>/pair</code> command
+          is processed. All other messages from unpaired users are ignored with a prompt to pair first. This prevents
+          unauthorized access — nobody can send commands to your Mercury instance without pairing.</p>
+      </div>
+
+      <p><strong>To pair:</strong> Send <code>/start</code> or <code>/pair</code> to your Mercury bot in a private chat.
+        The bot records your Telegram user ID and chat ID, and from that point forward, only your messages are processed.</p>
+
+      <p><strong>To unpair:</strong> Send <code>/unpair</code> to remove the pairing. The bot will then require
+        <code>/start</code> again to re-pair.</p>
+
+      <div class="callout callout-warn">
+        <div class="callout-title">Private chats only</div>
+        <p>Mercury only works in private (one-to-one) chats. Messages in groups or channels are ignored.</p>
+      </div>
+
+      <h3>Features</h3>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Text streaming</td>
+            <td>Real-time response editing with typing indicators (toggle with <code>/stream</code>)</td>
+          </tr>
+          <tr>
+            <td>File uploads</td>
+            <td>Photos, audio, video, and documents auto-detected and sent with the right API</td>
+          </tr>
+          <tr>
+            <td>HTML formatting</td>
+            <td>Markdown automatically converted to Telegram-compatible HTML</td>
+          </tr>
+          <tr>
+            <td>Inline keyboards</td>
+            <td>Shell command and scope approvals shown as Allow / Always / Deny buttons</td>
+          </tr>
+          <tr>
+            <td>Paired messaging</td>
+            <td>The <code>send_message</code> tool lets Mercury proactively send you messages</td>
+          </tr>
+          <tr>
+            <td>Bot commands menu</td>
+            <td>12 commands registered in Telegram's bot menu for quick access</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Configuration</h3>
+      <p>Telegram is set up during <code>mercury doctor</code> or initial onboarding. You need a bot token from
+        <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>.</p>
+
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Variable</th>
+            <th>Description</th>
+            <th>Default</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>TELEGRAM_BOT_TOKEN</td>
+            <td>Bot token from @BotFather</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td>TELEGRAM_ENABLED</td>
+            <td>Enable/disable Telegram channel</td>
+            <td>false</td>
+          </tr>
+          <tr>
+            <td>TELEGRAM_STREAMING</td>
+            <td>Enable real-time text streaming</td>
+            <td>true</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>Type <code>none</code> as the bot token during <code>mercury doctor</code> to disable Telegram.</p>
+
       <h2 id="tools">Built-in Tools</h2>
       <p>Mercury has a built-in toolset it can use during conversations. These are not CLI commands — the agent decides
         when to call them.</p>
@@ -988,9 +1086,19 @@
             <td>command</td>
           </tr>
           <tr>
+            <td>cd</td>
+            <td>Change working directory (persists across calls)</td>
+            <td>path</td>
+          </tr>
+          <tr>
             <td>approve_command</td>
             <td>Permanently approve a command type</td>
             <td>command (e.g. "curl")</td>
+          </tr>
+          <tr>
+            <td>send_message</td>
+            <td>Send a message to the paired Telegram chat</td>
+            <td>message</td>
           </tr>
         </tbody>
       </table>
@@ -1147,19 +1255,76 @@
       </code> in their SKILL.md get automatic approval for those tools during execution.</p>
 
       <h2 id="providers">Provider Fallback</h2>
-      <p>Configure multiple LLM providers. Mercury tries them in order and falls back automatically:</p>
-      <ul>
-        <li><strong>DeepSeek</strong> — default, cost-effective</li>
-        <li><strong>OpenAI</strong> — GPT-4o-mini and others</li>
-        <li><strong>Anthropic</strong> — Claude and others</li>
-        <li><strong>Grok</strong> — xAI chat models</li>
-        <li><strong>Ollama Cloud</strong> — hosted Ollama models with API key auth</li>
-        <li><strong>Ollama Local</strong> — your local Ollama server with base URL + model</li>
-      </ul>
-      <p>During onboarding, Mercury lets you choose one or more providers first. After each valid credential, it fetches a short list of recommended chat-capable models, lets you pick one with arrow keys, and still allows manual model entry when needed.</p>
-      <p>Default selection rules are simple: if only one provider is configured, that provider becomes the default; if several are configured, Mercury asks you which one should be the default, with DeepSeek preselected when available.</p>
-      <p>When a provider fails, Mercury automatically tries the next one. It remembers the last successful provider and
-        starts there on the next request.</p>
+      <p>Configure multiple LLM providers. Mercury tries them in order and falls back automatically. When a provider
+        fails, Mercury tries the next one and remembers the last successful provider.</p>
+
+      <h3>Supported Providers</h3>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th>Default Model</th>
+            <th>API Key</th>
+            <th>Configuration</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>DeepSeek</strong></td>
+            <td>deepseek-chat</td>
+            <td>DEEPSEEK_API_KEY</td>
+            <td>Default provider, cost-effective</td>
+          </tr>
+          <tr>
+            <td><strong>OpenAI</strong></td>
+            <td>gpt-4o-mini</td>
+            <td>OPENAI_API_KEY</td>
+            <td>GPT-4o-mini, GPT-4o, o3, etc.</td>
+          </tr>
+          <tr>
+            <td><strong>Anthropic</strong></td>
+            <td>claude-sonnet-4-20250514</td>
+            <td>ANTHROPIC_API_KEY</td>
+            <td>Claude Sonnet, Haiku, Opus</td>
+          </tr>
+          <tr>
+            <td><strong>Grok (xAI)</strong></td>
+            <td>grok-4</td>
+            <td>GROK_API_KEY</td>
+            <td>OpenAI-compatible endpoint</td>
+          </tr>
+          <tr>
+            <td><strong>Ollama Cloud</strong></td>
+            <td>gpt-oss:120b</td>
+            <td>OLLAMA_CLOUD_API_KEY</td>
+            <td>Remote Ollama models via API</td>
+          </tr>
+          <tr>
+            <td><strong>Ollama Local</strong></td>
+            <td>gpt-oss:20b</td>
+            <td>No key needed</td>
+            <td>Local Ollama instance (127.0.0.1:11434)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Configuring Providers</h3>
+      <p>Run <code>mercury doctor</code> and enter API keys for the providers you want to use. You can also set
+        environment variables directly or edit <code>~/.mercury/mercury.yaml</code>.</p>
+
+      <div class="callout">
+        <div class="callout-title">Environment variables</div>
+        <p>Each provider has env vars for its API key, base URL, and model. For example, DeepSeek uses
+          <code>DEEPSEEK_API_KEY</code>, <code>DEEPSEEK_BASE_URL</code>, and <code>DEEPSEEK_MODEL</code>.
+          Ollama Local requires no API key — just set <code>OLLAMA_LOCAL_ENABLED=true</code> and
+          <code>OLLAMA_LOCAL_MODEL</code> to your preferred local model.</p>
+      </div>
+
+      <div class="callout callout-warn">
+        <div class="callout-title">More providers coming</div>
+        <p>Google Gemini, Mistral, and other providers are on the roadmap. Mercury's OpenAI-compatible provider
+          architecture means you can often configure additional providers by setting a custom base URL and API key.</p>
+      </div>
 
       <h2 id="scheduling">Scheduling</h2>
       <p>Mercury can schedule tasks using cron expressions or one-shot delays.</p>
