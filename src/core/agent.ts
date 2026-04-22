@@ -29,7 +29,8 @@ import {
 
 class ToolCallLoopDetector {
   private recentCalls: Array<{ tool: string; params: string }> = [];
-  private maxEntries = 10;
+  private maxEntries = 16;
+  private aborted = false;
 
   record(toolName: string, params: Record<string, any>): void {
     const paramsKey = JSON.stringify(params).slice(0, 100);
@@ -39,41 +40,57 @@ class ToolCallLoopDetector {
     }
   }
 
-  detect(): { tool: string; count: number } | null {
+  detect(): { tool: string; count: number; message: string } | null {
     if (this.recentCalls.length < 3) return null;
 
     const last = this.recentCalls[this.recentCalls.length - 1];
-    let consecutiveCount = 0;
+
+    let identicalCount = 0;
     for (let i = this.recentCalls.length - 1; i >= 0; i--) {
       if (this.recentCalls[i].tool === last.tool && this.recentCalls[i].params === last.params) {
-        consecutiveCount++;
+        identicalCount++;
       } else {
         break;
       }
     }
 
-    if (consecutiveCount >= 3) {
-      return { tool: last.tool, count: consecutiveCount };
+    if (identicalCount >= 3) {
+      this.aborted = true;
+      return {
+        tool: last.tool,
+        count: identicalCount,
+        message: `You called "${last.tool}" ${identicalCount} times with identical parameters and got the same result. Stop repeating this call entirely.`,
+      };
     }
 
     const lastTool = last.tool;
-    let toolCount = 0;
+    let sameToolCount = 0;
     for (let i = this.recentCalls.length - 1; i >= 0; i--) {
       if (this.recentCalls[i].tool === lastTool) {
-        toolCount++;
+        sameToolCount++;
       } else {
         break;
       }
     }
-    if (toolCount >= 4) {
-      return { tool: lastTool, count: toolCount };
+    if (sameToolCount >= 3) {
+      this.aborted = true;
+      return {
+        tool: lastTool,
+        count: sameToolCount,
+        message: `You called "${lastTool}" ${sameToolCount} times in a row with slightly different parameters and it isn't working. Stop — the approach is wrong. Step back, tell the user what you tried and what failed, and suggest alternatives instead of retrying.`,
+      };
     }
 
     return null;
   }
 
+  isAborted(): boolean {
+    return this.aborted;
+  }
+
   reset(): void {
     this.recentCalls = [];
+    this.aborted = false;
   }
 }
 
@@ -269,7 +286,7 @@ export class Agent {
         if (toolCalls.length >= 3) {
           const last3 = toolCalls.slice(-3);
           if (last3[0] === last3[1] && last3[1] === last3[2]) {
-            loopWarning = `[SYSTEM WARNING] You have called ${last3[0]} 3+ times in a row with the same result. Stop repeating this call. Try a different approach — if you're failing on permissions, try a different path. If you're failing on git push auth, use github_api with PUT /repos/{owner}/{repo}/contents/{path} to push files directly through the API.`;
+            loopWarning = `[SYSTEM WARNING] In previous turns you called ${last3[0]} repeatedly. Do NOT call it again. If something failed, explain the failure to the user and suggest alternatives.`;
           }
         }
       }
@@ -314,6 +331,8 @@ export class Agent {
       let lastError: any = null;
       let streamedText = '';
       const loopDetector = new ToolCallLoopDetector();
+      const loopAbortController = new AbortController();
+      let loopWarningSent = false;
 
       const canStream = msg.channelType === 'cli' || (msg.channelType === 'telegram' && this.telegramStreaming);
 
@@ -328,6 +347,7 @@ export class Agent {
               messages,
               tools: this.capabilities.getTools(),
               maxSteps: MAX_STEPS,
+              abortSignal: loopAbortController.signal,
               onStepFinish: async ({ toolCalls }) => {
                 if (toolCalls && toolCalls.length > 0) {
                   const names = toolCalls.map((tc: any) => tc.toolName).join(', ');
@@ -337,7 +357,12 @@ export class Agent {
                   }
                   const loop = loopDetector.detect();
                   if (loop) {
-                    logger.warn({ tool: loop.tool, count: loop.count }, 'Tool call loop detected');
+                    logger.warn({ tool: loop.tool, count: loop.count }, 'Tool call loop detected — aborting generation');
+                    if (!loopWarningSent && channel && msg.channelType !== 'internal') {
+                      loopWarningSent = true;
+                      await channel.send(`⚠ Loop detected — ${loop.tool} called ${loop.count}x in a row. Stopping to save tokens.`, msg.channelId).catch(() => {});
+                    }
+                    loopAbortController.abort();
                   }
                   await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
                 }
@@ -377,6 +402,7 @@ export class Agent {
               messages,
               tools: this.capabilities.getTools(),
               maxSteps: MAX_STEPS,
+              abortSignal: loopAbortController.signal,
               onStepFinish: async ({ toolCalls, text }) => {
                 if (toolCalls && toolCalls.length > 0) {
                   const names = toolCalls.map((tc: any) => tc.toolName).join(', ');
@@ -386,7 +412,12 @@ export class Agent {
                   }
                   const loop = loopDetector.detect();
                   if (loop) {
-                    logger.warn({ tool: loop.tool, count: loop.count }, 'Tool call loop detected');
+                    logger.warn({ tool: loop.tool, count: loop.count }, 'Tool call loop detected — aborting generation');
+                    if (!loopWarningSent && channel && msg.channelType !== 'internal') {
+                      loopWarningSent = true;
+                      await channel.send(`⚠ Loop detected — ${loop.tool} called ${loop.count}x in a row. Stopping to save tokens.`, msg.channelId).catch(() => {});
+                    }
+                    loopAbortController.abort();
                   }
                   if (channel && msg.channelType !== 'internal') {
                     await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
@@ -400,6 +431,16 @@ export class Agent {
           this.providers.markSuccess(provider.name);
           break;
         } catch (err: any) {
+          if (loopDetector.isAborted()) {
+            logger.info('Generation aborted due to loop detection — using partial response');
+            if (!result && streamedText) {
+              result = { text: streamedText, usage: undefined };
+            }
+            if (usedProvider) {
+              this.providers.markSuccess(usedProvider.name);
+            }
+            break;
+          }
           lastError = err;
           logger.warn({ provider: provider.name, err: err.message }, 'Provider failed, trying fallback');
           if (channel && msg.channelType !== 'internal') {
