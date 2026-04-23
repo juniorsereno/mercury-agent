@@ -35,9 +35,11 @@ class ToolCallLoopDetector {
   private totalCalls = 0;
   private hardAborted = false;
   private recentStepTexts: Array<string> = [];
+  private consecutiveNoActionSteps = 0;
 
   private static readonly ABSOLUTE_MAX = 25;
   private static readonly FAILED_ABSOLUTE_MAX = 12;
+  private static readonly NO_ACTION_MAX = 5;
 
   private static readonly HIGH_TOLERANCE_TOOLS = new Set([
     'fetch_url',
@@ -67,9 +69,15 @@ class ToolCallLoopDetector {
     const paramsKey = JSON.stringify(params).slice(0, 200);
     this.recentCalls.push({ tool: toolName, params: paramsKey, failed });
     this.totalCalls++;
+    this.consecutiveNoActionSteps = 0;
     if (this.recentCalls.length > 30) {
       this.recentCalls.shift();
     }
+  }
+
+  recordNoActionResult(): boolean {
+    this.consecutiveNoActionSteps++;
+    return this.consecutiveNoActionSteps >= ToolCallLoopDetector.NO_ACTION_MAX;
   }
 
   recordStepText(text: string): void {
@@ -226,6 +234,7 @@ class ToolCallLoopDetector {
     this.totalCalls = 0;
     this.hardAborted = false;
     this.recentStepTexts = [];
+    this.consecutiveNoActionSteps = 0;
   }
 }
 
@@ -620,6 +629,16 @@ export class Agent {
                   if (stepText) {
                     loopDetector.recordStepText(String(stepText));
                   }
+                  const noActionLoop = loopDetector.recordNoActionResult();
+                  if (noActionLoop) {
+                    logger.warn('Reasoning loop detected — model keeps thinking without acting, aborting');
+                    if (!loopWarningSent && channel && msg.channelType !== 'internal') {
+                      loopWarningSent = true;
+                      await channel.send('⚠ I\'m stuck in a reasoning loop (thinking without taking action). Stopping.', msg.channelId).catch(() => {});
+                    }
+                    loopAbortController.abort();
+                    return;
+                  }
                   const textRepeat = loopDetector.detectTextRepetition();
                   if (textRepeat) {
                     logger.warn({ pattern: textRepeat.pattern, count: textRepeat.count }, 'Text repetition loop detected — aborting');
@@ -771,6 +790,16 @@ export class Agent {
                   const stepText = (toolResults as any)?.text ?? '';
                   if (stepText) {
                     loopDetector.recordStepText(String(stepText));
+                  }
+                  const noActionLoop = loopDetector.recordNoActionResult();
+                  if (noActionLoop) {
+                    logger.warn('Reasoning loop detected — model keeps thinking without acting, aborting');
+                    if (!loopWarningSent && channel && msg.channelType !== 'internal') {
+                      loopWarningSent = true;
+                      await channel.send('⚠ I\'m stuck in a reasoning loop (thinking without taking action). Stopping.', msg.channelId).catch(() => {});
+                    }
+                    loopAbortController.abort();
+                    return;
                   }
                   const textRepeat = loopDetector.detectTextRepetition();
                   if (textRepeat) {
