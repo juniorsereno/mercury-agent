@@ -1,5 +1,7 @@
 import type { ChannelType, ChannelMessage } from '../types/channel.js';
 
+export type PermissionMode = 'allow-all' | 'ask-me';
+
 export interface Channel {
   readonly type: ChannelType;
   start(): Promise<void>;
@@ -8,6 +10,8 @@ export interface Channel {
   sendFile(filePath: string, targetId?: string): Promise<void>;
   stream(content: AsyncIterable<string>, targetId?: string): Promise<string>;
   typing(targetId?: string): Promise<void>;
+  askToContinue(question: string, targetId?: string): Promise<boolean>;
+  askPermissionMode?(): Promise<PermissionMode>;
   isReady(): boolean;
   onMessage(handler: (msg: ChannelMessage) => void): void;
 }
@@ -23,6 +27,7 @@ export abstract class BaseChannel implements Channel {
   abstract sendFile(filePath: string, targetId?: string): Promise<void>;
   abstract stream(content: AsyncIterable<string>, targetId?: string): Promise<string>;
   abstract typing(targetId?: string): Promise<void>;
+  abstract askToContinue(question: string, targetId?: string): Promise<boolean>;
 
   isReady(): boolean {
     return this.ready;

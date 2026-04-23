@@ -3,14 +3,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
 import type { ChannelMessage } from '../types/channel.js';
-import { BaseChannel } from './base.js';
+import { BaseChannel, type PermissionMode } from './base.js';
 import { logger } from '../utils/logger.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { formatToolStep, formatToolResult } from '../utils/tool-label.js';
 import {
   ArrowSelectCancelledError,
   selectWithArrowKeys,
   type ArrowSelectOption,
 } from '../utils/arrow-select.js';
+
+const USER_PROMPT = '  You: ';
+const SPINNER_FRAMES = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+
+function agentName(name: string, suffix?: string): string {
+  return chalk.cyan(`  ${name}:`) + (suffix ?? '');
+}
 
 export class CLIChannel extends BaseChannel {
   readonly type = 'cli' as const;
@@ -19,6 +27,13 @@ export class CLIChannel extends BaseChannel {
   private menuDepth = 0;
   private menuAbortController: AbortController | null = null;
   private outputInProgress = 0;
+  private streamActive = false;
+  private turnHeaderPrinted = false;
+  private stepCount = 0;
+  private stepStartTime = 0;
+  private spinnerFrame = 0;
+  private spinnerTimer: ReturnType<typeof setInterval> | null = null;
+  private spinnerLine = '';
 
   constructor(agentName: string = 'Mercury') {
     super();
@@ -32,7 +47,6 @@ export class CLIChannel extends BaseChannel {
   async start(): Promise<void> {
     this.createInterface();
     this.ready = true;
-    this.showPrompt();
     logger.info('CLI channel started');
   }
 
@@ -40,8 +54,8 @@ export class CLIChannel extends BaseChannel {
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
-      prompt: '  You: ',
     });
+    this.rl.setPrompt(USER_PROMPT);
 
     this.rl.on('line', (line) => {
       const trimmed = line.trim();
@@ -71,16 +85,14 @@ export class CLIChannel extends BaseChannel {
   async send(content: string, _targetId?: string, elapsedMs?: number): Promise<void> {
     this.closeActiveMenu();
     this.beginOutput();
+    this.turnHeaderPrinted = false;
     const timeStr = elapsedMs != null ? chalk.dim(` (${(elapsedMs / 1000).toFixed(1)}s)`) : '';
-    const rendered = renderMarkdown(content);
-    console.log('');
-    console.log(chalk.cyan(`  ${this.agentName}:`) + timeStr);
-    const indented = rendered
-      .split('\n')
-      .map((line: string) => `  ${line}`)
-      .join('\n');
-    console.log(indented);
-    console.log('');
+
+    const block = this.formatBlock(this.agentName, timeStr, content);
+    for (const line of block) {
+      console.log(line);
+    }
+
     this.endOutput();
   }
 
@@ -99,38 +111,139 @@ export class CLIChannel extends BaseChannel {
       : stat.size > 1024
         ? `${(stat.size / 1024).toFixed(1)}KB`
         : `${stat.size}B`;
-    console.log('');
-    console.log(chalk.cyan(`  ${this.agentName}:`) + chalk.dim(' (file)'));
-    console.log(chalk.dim(`  path: ${resolved}`));
-    console.log(chalk.dim(`  size: ${sizeStr}`));
-    console.log('');
+
+    const block = this.formatBlock(this.agentName, chalk.dim(' (file)'), [
+      chalk.dim(`path: ${resolved}`),
+      chalk.dim(`size: ${sizeStr}`),
+    ].join('\n'));
+    for (const line of block) {
+      console.log(line);
+    }
+
     this.endOutput();
+  }
+
+  async sendToolFeedback(toolName: string, args: Record<string, any>): Promise<void> {
+    this.stopSpinner();
+    if (!this.turnHeaderPrinted) {
+      this.turnHeaderPrinted = true;
+      console.log('');
+      console.log(agentName(this.agentName, ''));
+      console.log('');
+    }
+    this.stepCount += 1;
+    this.stepStartTime = Date.now();
+
+    const label = formatToolStep(toolName, args);
+    const stepPrefix = chalk.dim(`  ${this.stepCount}.`);
+
+    console.log(`${stepPrefix} ${chalk.dim(label)}`);
+    this.startSpinner();
+  }
+
+  sendStepDone(toolName: string, result: unknown): void {
+    this.stopSpinner();
+    const elapsed = ((Date.now() - this.stepStartTime) / 1000).toFixed(1);
+    const summary = formatToolResult(toolName, result);
+    if (summary) {
+      console.log(chalk.dim(`     ${summary} (${elapsed}s)`));
+    } else {
+      process.stdout.write(chalk.dim(`     ${elapsed}s\n`));
+    }
+  }
+
+  private startSpinner(): void {
+    if (!process.stdout.isTTY) return;
+    this.spinnerFrame = 0;
+    this.spinnerLine = '';
+    this.spinnerTimer = setInterval(() => {
+      const frame = SPINNER_FRAMES[this.spinnerFrame % SPINNER_FRAMES.length];
+      const elapsed = ((Date.now() - this.stepStartTime) / 1000).toFixed(0);
+      this.spinnerLine = chalk.dim(`     ${frame} Step ${this.stepCount} · ${elapsed}s`);
+      process.stdout.write(`\x1b[2K\r${this.spinnerLine}`);
+      this.spinnerFrame++;
+    }, 80);
+  }
+
+  private stopSpinner(): void {
+    if (this.spinnerTimer) {
+      clearInterval(this.spinnerTimer);
+      this.spinnerTimer = null;
+    }
+    if (this.spinnerLine) {
+      process.stdout.write('\x1b[2K\r');
+      this.spinnerLine = '';
+    }
   }
 
   async stream(content: AsyncIterable<string>, _targetId?: string): Promise<string> {
     this.closeActiveMenu();
     this.beginOutput();
-    console.log('');
-    process.stdout.write(chalk.cyan(`  ${this.agentName}: `));
+    this.stepCount = 0;
+    this.turnHeaderPrinted = false;
+
+    if (!process.stdout.isTTY) {
+      process.stdout.write(chalk.cyan(`  ${this.agentName}: `));
+      let full = '';
+      for await (const chunk of content) {
+        process.stdout.write(chunk);
+        full += chunk;
+      }
+      console.log('\n');
+      this.endOutput();
+      return full;
+    }
+
+    this.streamActive = true;
     let full = '';
     for await (const chunk of content) {
-      process.stdout.write(chunk);
+      this.stopSpinner();
+      if (!this.turnHeaderPrinted) {
+        this.turnHeaderPrinted = true;
+        process.stdout.write(chalk.dim(`  ${this.agentName} is thinking...\r`));
+      }
       full += chunk;
     }
-    console.log('\n');
+    this.streamActive = false;
+
+    if (!full.trim()) {
+      process.stdout.write('\x1b[2K\r');
+      console.log('');
+      this.endOutput();
+      return full;
+    }
+
+    process.stdout.write('\x1b[2K\r');
+    const block = this.formatBlock(this.agentName, '', full);
+    for (const line of block) {
+      console.log(line);
+    }
+
     this.endOutput();
     return full;
   }
 
   async typing(_targetId?: string): Promise<void> {
-    process.stdout.write(chalk.dim(`  ${this.agentName} is thinking...\r`));
+    this.stopSpinner();
+    if (process.stdout.isTTY) {
+      process.stdout.write(chalk.dim(`  ${this.agentName} is thinking...\r`));
+    }
   }
 
   showPrompt(): void {
     if (this.rl) {
-      this.rl.setPrompt('  You: ');
-      this.rl.prompt();
+      process.stdout.write('\x1b[2K\r');
+      process.stdout.write(chalk.yellow(USER_PROMPT));
     }
+  }
+
+  private formatBlock(name: string, suffix: string, content: string): string[] {
+    const header = agentName(name, suffix);
+    const body = renderMarkdown(content)
+      .split('\n')
+      .map((line: string) => `  ${line}`)
+      .join('\n');
+    return ['', header, '', body, ''];
   }
 
   async withMenu<T>(runner: (select: (title: string, options: ArrowSelectOption[]) => Promise<string>) => Promise<T>): Promise<T | undefined> {
@@ -196,12 +309,65 @@ export class CLIChannel extends BaseChannel {
     });
   }
 
+  async askPermissionMode(): Promise<PermissionMode> {
+    if (!process.stdout.isTTY) return 'ask-me';
+
+    this.suspendPrompt();
+
+    console.log('');
+    console.log(chalk.bold('  Permission Mode'));
+    console.log(chalk.dim('  Choose how Mercury handles risky actions this session.'));
+    console.log('');
+
+    const options: ArrowSelectOption[] = [
+      { value: 'ask-me', label: 'Ask Me — confirm before file writes, shell commands, and scope changes' },
+      { value: 'allow-all', label: 'Allow All — auto-approve everything (scopes, commands, loop continuation)' },
+    ];
+
+    try {
+      const selected = await selectWithArrowKeys('Select permission mode:', options, {
+        helperText: '↑↓ to move, Enter to select',
+      });
+
+      if (selected === 'allow-all') {
+        console.log('');
+        console.log(chalk.yellow('  ⚠ Allow All active for this session:'));
+        console.log(chalk.dim('     • All directory scopes auto-approved'));
+        console.log(chalk.dim('     • All shell commands auto-approved (except blocked)'));
+        console.log(chalk.dim('     • Loop detection will auto-continue'));
+        console.log(chalk.dim('     • Resets on restart'));
+        console.log('');
+      } else {
+        console.log('');
+        console.log(chalk.dim('  Confirm-before-act mode active.'));
+        console.log('');
+      }
+
+      return selected as PermissionMode;
+    } catch {
+      return 'ask-me';
+    } finally {
+      this.resumePrompt();
+    }
+  }
+
   async askPermission(prompt: string): Promise<string> {
     return new Promise((resolve) => {
       console.log('');
       console.log(chalk.yellow(`  ⚠ ${prompt}`));
       this.rl?.question(chalk.yellow('  > '), (answer) => {
         resolve(answer.trim());
+      });
+    });
+  }
+
+  async askToContinue(question: string, _targetId?: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      console.log('');
+      console.log(chalk.yellow(`  ⚠ ${question}`));
+      this.rl?.question(chalk.yellow('  Continue? [y/N] '), (answer) => {
+        const val = answer.trim().toLowerCase();
+        resolve(val === 'y' || val === 'yes');
       });
     });
   }

@@ -206,7 +206,7 @@ export function getDefaultConfig(): MercuryConfig {
       intervalMinutes: getEnvNum('HEARTBEAT_INTERVAL_MINUTES', 60),
     },
     tokens: {
-      dailyBudget: getEnvNum('DAILY_TOKEN_BUDGET', 50000),
+      dailyBudget: getEnvNum('DAILY_TOKEN_BUDGET', 1_000_000),
     },
   };
 }

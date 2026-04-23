@@ -110,6 +110,13 @@ In daemon mode, Telegram becomes your primary channel — CLI is log-only since 
 | `mercury setup` | Re-run the setup wizard |
 | `mercury status` | Show config and daemon status |
 | `mercury help` | Show full manual |
+| `mercury telegram list` | List approved and pending Telegram users |
+| `mercury telegram approve <code\|id>` | Approve a pairing code or pending request |
+| `mercury telegram reject <id>` | Reject a pending Telegram access request |
+| `mercury telegram remove <id>` | Remove an approved Telegram user |
+| `mercury telegram promote <id>` | Promote a Telegram member to admin |
+| `mercury telegram demote <id>` | Demote a Telegram admin to member |
+| `mercury telegram reset` | Clear all Telegram access and start fresh |
 | `mercury service install` | Install as system service (auto-start on boot) |
 | `mercury service uninstall` | Uninstall system service |
 | `mercury service status` | Show system service status |
@@ -149,17 +156,20 @@ Type these during a conversation — they don't consume API tokens. Work on both
 
 | Channel | Features |
 |---------|----------|
-| **CLI** | Readline prompt, real-time text streaming, markdown rendering, file display |
-| **Telegram** | HTML formatting, file uploads (photos, audio, video, documents), typing indicators, `/budget` commands |
+| **CLI** | Readline prompt, arrow-key command menus, real-time text streaming, markdown rendering |
+| **Telegram** | HTML formatting, file uploads, typing indicators, multi-user access with admin/member roles |
 
-### Telegram Pairing
+### Telegram Access
 
-Mercury uses a **single-owner pairing model** — only one Telegram account can be paired at a time.
+Mercury uses an **organization access model** with admins and members.
 
-- **Unpaired bots** only process `/start` or `/pair`. All other messages are ignored. This prevents unauthorized access.
-- **To pair:** Send `/start` to your Mercury bot in a private chat. The bot records your user ID and chat ID.
-- **To unpair:** Send `/unpair` to remove the pairing.
-- Mercury only works in private (one-to-one) chats. Group messages are ignored.
+- **First-time setup:** Send `/start` to your bot, receive a pairing code, enter it in the CLI with `mercury telegram approve <code>`. You become the first admin.
+- **Additional users:** Send `/start` to request access. Admins approve or reject from the CLI.
+- **Roles:** Admins can approve/reject requests, promote/demote users, and reset access. Members can chat with Mercury.
+- **Reset:** Admins can send `/unpair` in Telegram or run `mercury telegram reset` in the CLI to clear all access and start fresh.
+- Private chats only — group messages are always ignored.
+
+CLI commands: `mercury telegram list|approve|reject|remove|promote|demote|reset`
 
 ## Scheduler
 
@@ -225,4 +235,4 @@ MIT © [Cosmic Stack](https://github.com/cosmicstack-labs)
 
 ## Suggestions and Contributions
 
-For suggestions, contributions, or any inquiries, please reach out to us at [support@cosmicstack.org](mailto:support@cosmicstack.org).
+For suggestions, contributions, or any inquiries, please reach out to us at [mercury@cosmicstack.org](mailto:mercury@cosmicstack.org).

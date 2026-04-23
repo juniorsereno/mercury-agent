@@ -13,6 +13,7 @@ import { Lifecycle } from './lifecycle.js';
 import { Scheduler } from './scheduler.js';
 import { logger } from '../utils/logger.js';
 import { CLIChannel } from '../channels/cli.js';
+import { formatToolStep } from '../utils/tool-label.js';
 import type { ArrowSelectOption } from '../utils/arrow-select.js';
 import {
   approveTelegramPendingRequest,
@@ -30,51 +31,110 @@ import {
 
 class ToolCallLoopDetector {
   private recentCalls: Array<{ tool: string; params: string }> = [];
-  private maxEntries = 10;
+  private totalCalls = 0;
+  private hardAborted = false;
+
+  private static readonly ABSOLUTE_MAX = 25;
+
+  private static readonly HIGH_TOLERANCE_TOOLS = new Set([
+    'fetch_url',
+    'read_file',
+    'list_dir',
+    'web_search',
+    'github_api',
+    'run_command',
+  ]);
+
+  private static getIdenticalThreshold(): number {
+    return 3;
+  }
+
+  private static getSameToolThreshold(toolName: string): number {
+    return ToolCallLoopDetector.HIGH_TOLERANCE_TOOLS.has(toolName) ? 8 : 4;
+  }
 
   record(toolName: string, params: Record<string, any>): void {
-    const paramsKey = JSON.stringify(params).slice(0, 100);
+    const paramsKey = JSON.stringify(params).slice(0, 200);
     this.recentCalls.push({ tool: toolName, params: paramsKey });
-    if (this.recentCalls.length > this.maxEntries) {
+    this.totalCalls++;
+    if (this.recentCalls.length > 30) {
       this.recentCalls.shift();
     }
   }
 
-  detect(): { tool: string; count: number } | null {
+  detectAbsoluteLimit(): boolean {
+    return this.totalCalls >= ToolCallLoopDetector.ABSOLUTE_MAX;
+  }
+
+  detectIdentical(): { tool: string; count: number; message: string } | null {
     if (this.recentCalls.length < 3) return null;
 
     const last = this.recentCalls[this.recentCalls.length - 1];
-    let consecutiveCount = 0;
+
+    let identicalCount = 0;
     for (let i = this.recentCalls.length - 1; i >= 0; i--) {
       if (this.recentCalls[i].tool === last.tool && this.recentCalls[i].params === last.params) {
+        identicalCount++;
+      } else {
+        break;
+      }
+    }
+
+    if (identicalCount >= ToolCallLoopDetector.getIdenticalThreshold()) {
+      this.hardAborted = true;
+      return {
+        tool: last.tool,
+        count: identicalCount,
+        message: `[SYSTEM] You called "${last.tool}" ${identicalCount} times with identical parameters and got the same result. This is a hard loop — stop immediately.`,
+      };
+    }
+
+    return null;
+  }
+
+  detectSameTool(): { tool: string; count: number } | null {
+    if (this.recentCalls.length < 3) return null;
+
+    const last = this.recentCalls[this.recentCalls.length - 1];
+
+    let consecutiveCount = 0;
+    for (let i = this.recentCalls.length - 1; i >= 0; i--) {
+      if (this.recentCalls[i].tool === last.tool) {
         consecutiveCount++;
       } else {
         break;
       }
     }
 
-    if (consecutiveCount >= 3) {
+    const threshold = ToolCallLoopDetector.getSameToolThreshold(last.tool);
+    if (consecutiveCount >= threshold) {
       return { tool: last.tool, count: consecutiveCount };
     }
 
-    const lastTool = last.tool;
-    let toolCount = 0;
-    for (let i = this.recentCalls.length - 1; i >= 0; i--) {
-      if (this.recentCalls[i].tool === lastTool) {
-        toolCount++;
-      } else {
-        break;
+    if (this.recentCalls.length >= 6) {
+      const lastN = this.recentCalls.slice(-6);
+      const toolCounts: Record<string, number> = {};
+      for (const call of lastN) {
+        toolCounts[call.tool] = (toolCounts[call.tool] || 0) + 1;
       }
-    }
-    if (toolCount >= 4) {
-      return { tool: lastTool, count: toolCount };
+      for (const [tool, count] of Object.entries(toolCounts)) {
+        if (count >= 5) {
+          return { tool, count };
+        }
+      }
     }
 
     return null;
   }
 
+  isHardAborted(): boolean {
+    return this.hardAborted;
+  }
+
   reset(): void {
     this.recentCalls = [];
+    this.totalCalls = 0;
+    this.hardAborted = false;
   }
 }
 
@@ -176,6 +236,7 @@ export class Agent {
       const isScheduled = msg.senderId === 'system' && msg.channelType !== 'internal';
       if (isInternal || isScheduled) {
         this.capabilities.permissions.setAutoApproveAll(true);
+        this.capabilities.permissions.addTempScope('/', true, true);
       }
 
     try {
@@ -327,6 +388,8 @@ export class Agent {
       let lastError: any = null;
       let streamedText = '';
       const loopDetector = new ToolCallLoopDetector();
+      const loopAbortController = new AbortController();
+      let loopWarningSent = false;
 
       const canStream = msg.channelType === 'cli' || (msg.channelType === 'telegram' && this.telegramStreaming);
 
@@ -341,18 +404,72 @@ export class Agent {
               messages,
               tools: this.capabilities.getTools(),
               maxSteps: MAX_STEPS,
-              onStepFinish: async ({ toolCalls }) => {
+              abortSignal: loopAbortController.signal,
+              onStepFinish: async ({ toolCalls, toolResults }) => {
                 if (toolCalls && toolCalls.length > 0) {
                   const names = toolCalls.map((tc: any) => tc.toolName).join(', ');
                   logger.info({ tools: names }, 'Tool call step');
                   for (const tc of toolCalls) {
                     loopDetector.record(tc.toolName, tc.args as Record<string, any>);
                   }
-                  const loop = loopDetector.detect();
-                  if (loop) {
-                    logger.warn({ tool: loop.tool, count: loop.count }, 'Tool call loop detected');
+                  if (loopDetector.detectAbsoluteLimit()) {
+                    logger.warn('Absolute tool call limit reached — aborting');
+                    if (channel && msg.channelType !== 'internal') {
+                      await channel.send('⚠ Tool call limit reached (25 calls). Stopping to prevent runaway loop.', msg.channelId).catch(() => {});
+                    }
+                    loopAbortController.abort();
+                    return;
                   }
-                  await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
+                  if (toolCalls.some((tc: any) => tc.toolName === 'use_skill')) {
+                    loopDetector.reset();
+                  }
+                  const hardLoop = loopDetector.detectIdentical();
+                  if (hardLoop) {
+                    logger.warn({ tool: hardLoop.tool, count: hardLoop.count }, 'Hard loop detected — aborting');
+                    if (!loopWarningSent && channel && msg.channelType !== 'internal') {
+                      loopWarningSent = true;
+                      await channel.send(`⚠ Repeated call detected — ${hardLoop.tool} called ${hardLoop.count}x with same params. Stopping.`, msg.channelId).catch(() => {});
+                    }
+                    loopAbortController.abort();
+                    return;
+                  }
+                  const softLoop = loopDetector.detectSameTool();
+                  if (softLoop && !loopWarningSent && channel && msg.channelType !== 'internal') {
+                    if (this.capabilities.permissions.isAutoApproveAll()) {
+                      loopDetector.reset();
+                      loopWarningSent = false;
+                    } else {
+                      loopWarningSent = true;
+                      const shouldContinue = await channel.askToContinue(
+                        `${softLoop.tool} has been called ${softLoop.count}x in a row. This might be a loop.`,
+                        msg.channelId,
+                      ).catch(() => false);
+                      if (shouldContinue) {
+                        loopDetector.reset();
+                        loopWarningSent = false;
+                      } else {
+                        loopAbortController.abort();
+                      }
+                    }
+                  }
+                  if (channel && msg.channelType !== 'internal') {
+                    if (channel instanceof CLIChannel) {
+                      for (const tc of toolCalls) {
+                        await (channel as CLIChannel).sendToolFeedback(tc.toolName, tc.args as Record<string, any>).catch(() => {});
+                      }
+                      if (toolResults) {
+                        for (let i = 0; i < toolResults.length; i++) {
+                          const tr = toolResults[i] as any;
+                          const tcName = toolCalls[i]?.toolName as string | undefined;
+                          if (tcName) {
+                            (channel as CLIChannel).sendStepDone(tcName, tr.result ?? tr);
+                          }
+                        }
+                      }
+                    } else {
+                      await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
+                    }
+                  }
                 }
               },
             });
@@ -390,19 +507,71 @@ export class Agent {
               messages,
               tools: this.capabilities.getTools(),
               maxSteps: MAX_STEPS,
-              onStepFinish: async ({ toolCalls, text }) => {
+              abortSignal: loopAbortController.signal,
+              onStepFinish: async ({ toolCalls, toolResults }) => {
                 if (toolCalls && toolCalls.length > 0) {
                   const names = toolCalls.map((tc: any) => tc.toolName).join(', ');
                   logger.info({ tools: names }, 'Tool call step');
                   for (const tc of toolCalls) {
                     loopDetector.record(tc.toolName, tc.args as Record<string, any>);
                   }
-                  const loop = loopDetector.detect();
-                  if (loop) {
-                    logger.warn({ tool: loop.tool, count: loop.count }, 'Tool call loop detected');
+                  if (loopDetector.detectAbsoluteLimit()) {
+                    logger.warn('Absolute tool call limit reached — aborting');
+                    if (channel && msg.channelType !== 'internal') {
+                      await channel.send('⚠ Tool call limit reached (25 calls). Stopping to prevent runaway loop.', msg.channelId).catch(() => {});
+                    }
+                    loopAbortController.abort();
+                    return;
+                  }
+                  if (toolCalls.some((tc: any) => tc.toolName === 'use_skill')) {
+                    loopDetector.reset();
+                  }
+                  const hardLoop = loopDetector.detectIdentical();
+                  if (hardLoop) {
+                    logger.warn({ tool: hardLoop.tool, count: hardLoop.count }, 'Hard loop detected — aborting');
+                    if (!loopWarningSent && channel && msg.channelType !== 'internal') {
+                      loopWarningSent = true;
+                      await channel.send(`⚠ Repeated call detected — ${hardLoop.tool} called ${hardLoop.count}x with same params. Stopping.`, msg.channelId).catch(() => {});
+                    }
+                    loopAbortController.abort();
+                    return;
+                  }
+                  const softLoop = loopDetector.detectSameTool();
+                  if (softLoop && !loopWarningSent && channel && msg.channelType !== 'internal') {
+                    if (this.capabilities.permissions.isAutoApproveAll()) {
+                      loopDetector.reset();
+                      loopWarningSent = false;
+                    } else {
+                      loopWarningSent = true;
+                      const shouldContinue = await channel.askToContinue(
+                        `${softLoop.tool} has been called ${softLoop.count}x in a row. This might be a loop.`,
+                        msg.channelId,
+                      ).catch(() => false);
+                      if (shouldContinue) {
+                        loopDetector.reset();
+                        loopWarningSent = false;
+                      } else {
+                        loopAbortController.abort();
+                      }
+                    }
                   }
                   if (channel && msg.channelType !== 'internal') {
-                    await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
+                    if (channel instanceof CLIChannel) {
+                      for (const tc of toolCalls) {
+                        await (channel as CLIChannel).sendToolFeedback(tc.toolName, tc.args as Record<string, any>).catch(() => {});
+                      }
+                      if (toolResults) {
+                        for (let i = 0; i < toolResults.length; i++) {
+                          const tr = toolResults[i] as any;
+                          const tcName = toolCalls[i]?.toolName as string | undefined;
+                          if (tcName) {
+                            (channel as CLIChannel).sendStepDone(tcName, tr.result ?? tr);
+                          }
+                        }
+                      }
+                    } else {
+                      await channel.send(`  [Using: ${names}]`, msg.channelId).catch(() => {});
+                    }
                   }
                 }
               },
@@ -413,6 +582,19 @@ export class Agent {
           this.providers.markSuccess(provider.name);
           break;
         } catch (err: any) {
+          if (loopDetector.isHardAborted() || loopAbortController.signal.aborted) {
+            logger.info('Generation aborted due to loop detection — using partial response');
+            if (!result && streamedText) {
+              result = { text: streamedText, usage: undefined };
+            }
+            if (!result) {
+              result = { text: 'I stopped because I was repeating the same tool calls. What would you like me to do differently?', usage: undefined };
+            }
+            if (usedProvider) {
+              this.providers.markSuccess(usedProvider.name);
+            }
+            break;
+          }
           lastError = err;
           logger.warn({ provider: provider.name, err: err.message }, 'Provider failed, trying fallback');
           if (channel && msg.channelType !== 'internal') {
@@ -553,6 +735,18 @@ Always specify owner and repo parameters on GitHub tools. The user's GitHub user
   private async handleScheduledTask(manifest: ScheduledTaskManifest): Promise<void> {
     logger.info({ task: manifest.id, channel: manifest.sourceChannelType }, 'Processing scheduled task');
     try {
+      const channel = manifest.sourceChannelType
+        ? this.channels.get(manifest.sourceChannelType as ChannelType)
+        : this.channels.getNotificationChannel();
+
+      if (channel && manifest.sourceChannelType !== 'internal') {
+        const skillInfo = manifest.skillName ? ` (${manifest.skillName})` : '';
+        await channel.send(
+          ` Scheduled task started${skillInfo}: ${manifest.description}\nAll actions auto-approved for this run.`,
+          manifest.sourceChannelId,
+        ).catch(() => {});
+      }
+
       let prompt = manifest.prompt || '';
       if (manifest.skillName) {
         const skillHint = `Invoke the skill "${manifest.skillName}" using the use_skill tool and follow its instructions.`;

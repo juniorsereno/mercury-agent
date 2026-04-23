@@ -3,7 +3,7 @@ import path from 'node:path';
 import { Bot, InputFile, InlineKeyboard } from 'grammy';
 import { autoRetry } from '@grammyjs/auto-retry';
 import type { ChannelMessage } from '../types/channel.js';
-import { BaseChannel } from './base.js';
+import { BaseChannel, type PermissionMode } from './base.js';
 import type { MercuryConfig, TelegramAccessUser, TelegramPendingRequest } from '../utils/config.js';
 import {
   addTelegramPendingRequest,
@@ -26,7 +26,7 @@ const MAX_MESSAGE_LENGTH = 4096;
 const ACCESS_ACTION_PREFIX = 'tg_access';
 const MEMORY_ACTION_PREFIX = 'tg_memory';
 
-type ApprovalResolver = (response: 'yes' | 'always' | 'no') => void;
+type ApprovalResolver = () => void;
 
 export class TelegramChannel extends BaseChannel {
   readonly type = 'telegram' as const;
@@ -35,6 +35,8 @@ export class TelegramChannel extends BaseChannel {
   private typingInterval: NodeJS.Timeout | null = null;
   private chatCommandContext?: import('../capabilities/registry.js').ChatCommandContext;
   private pendingApprovals: Map<string, ApprovalResolver> = new Map();
+  private permissionModeAsked = new Set<number>();
+  private onPermissionMode?: (mode: PermissionMode, chatId: number) => void;
 
   constructor(private config: MercuryConfig) {
     super();
@@ -42,6 +44,10 @@ export class TelegramChannel extends BaseChannel {
 
   setChatCommandContext(ctx: import('../capabilities/registry.js').ChatCommandContext): void {
     this.chatCommandContext = ctx;
+  }
+
+  setOnPermissionMode(handler: (mode: PermissionMode, chatId: number) => void): void {
+    this.onPermissionMode = handler;
   }
 
   async start(): Promise<void> {
@@ -97,6 +103,12 @@ export class TelegramChannel extends BaseChannel {
       this.lastActiveChatId = chatId;
       logger.info({ chatId, text: ctx.message.text?.slice(0, 50) }, 'Telegram message received');
 
+      if (!this.permissionModeAsked.has(chatId) && this.onPermissionMode) {
+        this.permissionModeAsked.add(chatId);
+        const mode = await this.askPermissionMode(`telegram:${chatId}`);
+        this.onPermissionMode(mode, chatId);
+      }
+
       if (command === '/unpair') {
         if (!this.isAdminUser(userId)) {
           await this.sendDirectMessage(chatId, 'Only Telegram admins can reset Telegram access.');
@@ -143,9 +155,8 @@ export class TelegramChannel extends BaseChannel {
       }
 
       this.pendingApprovals.delete(data);
-
-      const action = data.split(':')[1] as 'yes' | 'always' | 'no';
-      resolver(action);
+      resolver();
+      const action = data.split(':')[1];
       await ctx.answerCallbackQuery({ text: action === 'no' ? 'Denied' : 'Approved' });
     });
 
@@ -431,6 +442,74 @@ export class TelegramChannel extends BaseChannel {
         this.pendingApprovals.delete(`${id}:always`);
         this.pendingApprovals.delete(`${id}:no`);
         resolve('no');
+      }, 120_000);
+    });
+  }
+
+  async askToContinue(question: string, targetId?: string): Promise<boolean> {
+    const chatIds = this.resolveTargetChatIds(targetId);
+    const chatId = chatIds[0];
+    if (!chatId || !this.bot) return false;
+
+    const id = `loop_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const keyboard = new InlineKeyboard()
+      .text('Continue', `${id}:yes`)
+      .text('Stop', `${id}:no`);
+
+    try {
+      await this.bot.api.sendMessage(chatId, mdToTelegram(question), {
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      });
+    } catch {
+      await this.bot.api.sendMessage(chatId, question, {
+        reply_markup: keyboard,
+      });
+    }
+
+    return new Promise((resolve) => {
+      this.pendingApprovals.set(`${id}:yes`, () => resolve(true));
+      this.pendingApprovals.set(`${id}:no`, () => resolve(false));
+
+      setTimeout(() => {
+        this.pendingApprovals.delete(`${id}:yes`);
+        this.pendingApprovals.delete(`${id}:no`);
+        resolve(false);
+      }, 120_000);
+    });
+  }
+
+  async askPermissionMode(targetId?: string): Promise<PermissionMode> {
+    const chatIds = this.resolveTargetChatIds(targetId);
+    const chatId = chatIds[0];
+    if (!chatId || !this.bot) return 'ask-me';
+
+    const id = `perm_mode_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const keyboard = new InlineKeyboard()
+      .text('🔒 Ask Me', `${id}:ask-me`)
+      .text('✅ Allow All', `${id}:allow-all`);
+
+    const html = `<b>Permission Mode</b>\nHow should Mercury handle risky actions this session?\n\n🔒 <b>Ask Me</b> — confirm before file writes, commands, and scope changes\n✅ <b>Allow All</b> — auto-approve everything (scopes, commands, loops)`;
+
+    try {
+      await this.bot.api.sendMessage(chatId, html, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      });
+    } catch {
+      await this.bot.api.sendMessage(chatId, this.stripHtml(html), {
+        reply_markup: keyboard,
+      });
+    }
+
+    return new Promise((resolve) => {
+      this.pendingApprovals.set(`${id}:ask-me`, () => resolve('ask-me'));
+      this.pendingApprovals.set(`${id}:allow-all`, () => resolve('allow-all'));
+
+      setTimeout(() => {
+        this.pendingApprovals.delete(`${id}:ask-me`);
+        this.pendingApprovals.delete(`${id}:allow-all`);
+        resolve('ask-me');
       }, 120_000);
     });
   }

@@ -155,6 +155,10 @@ export class PermissionManager {
     this.autoApproveAll = value;
   }
 
+  isAutoApproveAll(): boolean {
+    return this.autoApproveAll;
+  }
+
   elevateForSkill(allowedTools: string[]): void {
     if (allowedTools.includes('run_command')) {
       this.elevatedCommands.add('run_command');

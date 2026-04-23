@@ -282,6 +282,10 @@
       <div class="nav-links" id="navLinks">
         <a href="index.html">Home</a>
         <a href="docs.html" style="color: var(--cyan);">Docs</a>
+        <button class="search-shortcut" id="searchBtn" aria-label="Search" onclick="document.getElementById('searchOverlay').classList.add('open');document.getElementById('searchInput').focus();">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <kbd id="searchKbdNav"></kbd>
+        </button>
         <a href="https://github.com/cosmicstack-labs/mercury-agent" class="github-btn" target="_blank" rel="noopener">
           <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" style="vertical-align:-2px;"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
           <span class="github-btn-text">Star</span>
@@ -297,6 +301,7 @@
       <nav>
         <div class="sidebar-heading">Getting Started</div>
         <a href="#installation">Installation</a>
+        <a href="#upgrade">Upgrade</a>
         <a href="#setup">First-Time Setup</a>
         <a href="#starting">Starting Mercury</a>
         <div class="sidebar-heading">CLI Commands</div>
@@ -330,6 +335,24 @@
       <p>Or run without installing:</p>
       <div class="terminal-inline">
         <code>npx @cosmicstack/mercury-agent</code>
+      </div>
+
+      <h2 id="upgrade">Upgrade</h2>
+      <p>Mercury includes a built-in upgrade command that handles the full update cycle:</p>
+      <div class="terminal-inline">
+        <code>mercury upgrade</code>
+      </div>
+      <p>This command:</p>
+      <ul>
+        <li><strong>Checks npm</strong> for the latest published version</li>
+        <li><strong>Stops the daemon</strong> if running, to avoid conflicts</li>
+        <li><strong>Removes the old package</strong> first to prevent <code>ENOTEMPTY</code> errors</li>
+        <li><strong>Installs</strong> the latest version globally</li>
+        <li><strong>Shows</strong> the before/after version comparison</li>
+      </ul>
+      <div class="callout">
+        <div class="callout-title">ENOTEMPTY fix</div>
+        <p>If you see <code>ENOTEMPTY: directory not empty, rename</code> when running <code>npm i -g</code> manually, use <code>mercury upgrade</code> instead — it removes the old package directory before installing the new one.</p>
       </div>
 
       <h2 id="setup">First-Time Setup</h2>
@@ -904,27 +927,109 @@
       <p>Mercury connects to Telegram via a bot token, providing a mobile-first interface with streaming, file uploads,
         and inline approval keyboards.</p>
 
-      <h3>Pairing</h3>
-      <p>Mercury uses a <strong>single-owner pairing model</strong>. Only one Telegram account can be paired to a Mercury
-        instance at a time. This ensures your agent only responds to you.</p>
+      <h3>Access Model</h3>
+      <p>Mercury uses an <strong>organization access model</strong> with admins and members. The first user becomes the
+        admin by completing a pairing-code flow during setup. Additional users request access by sending
+        <code>/start</code>, which admins can approve or reject.</p>
 
       <div class="callout" style="border-left-color: var(--cyan); background: rgba(0, 212, 255, 0.06);">
-        <div class="callout-title">Initial message only</div>
-        <p>When the bot is <strong>not yet paired</strong>, only the <code>/start</code> or <code>/pair</code> command
-          is processed. All other messages from unpaired users are ignored with a prompt to pair first. This prevents
-          unauthorized access — nobody can send commands to your Mercury instance without pairing.</p>
+        <div class="callout-title">First-time pairing</div>
+        <p>When no admins exist yet, sending <code>/start</code> creates a <strong>pairing code</strong> that must be entered in the CLI to complete setup. This ensures only the legitimate owner can gain initial access. Once an admin exists, new users send
+          <code>/start</code> to create a pending request that admins can approve or reject.</p>
       </div>
-
-      <p><strong>To pair:</strong> Send <code>/start</code> or <code>/pair</code> to your Mercury bot in a private chat.
-        The bot records your Telegram user ID and chat ID, and from that point forward, only your messages are processed.</p>
-
-      <p><strong>To unpair:</strong> Send <code>/unpair</code> to remove the pairing. The bot will then require
-        <code>/start</code> again to re-pair.</p>
 
       <div class="callout callout-warn">
         <div class="callout-title">Private chats only</div>
-        <p>Mercury only works in private (one-to-one) chats. Messages in groups or channels are ignored.</p>
+        <p>Mercury only works in private (one-to-one) chats. Messages in groups or channels are always ignored.</p>
       </div>
+
+      <h4>Roles</h4>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Role</th>
+            <th>Description</th>
+            <th>Can approve requests?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Admin</strong></td>
+            <td>First user to pair. Can approve/reject access requests, promote/demote users, and reset all access.</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td><strong>Member</strong></td>
+            <td>Approved by an admin. Can send messages and receive responses.</td>
+            <td>No</td>
+          </tr>
+          <tr>
+            <td><strong>Pending</strong></td>
+            <td>Sent <code>/start</code> but not yet approved. Can only see their pending status.</td>
+            <td>No</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>CLI Commands</h4>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>mercury telegram list</code></td>
+            <td>Show approved admins, members, and pending requests</td>
+          </tr>
+          <tr>
+            <td><code>mercury telegram approve &lt;code|userId&gt;</code></td>
+            <td>Approve the first pairing code or a pending request by user ID</td>
+          </tr>
+          <tr>
+            <td><code>mercury telegram reject &lt;userId&gt;</code></td>
+            <td>Reject a pending access request</td>
+          </tr>
+          <tr>
+            <td><code>mercury telegram remove &lt;userId&gt;</code></td>
+            <td>Remove an approved admin or member</td>
+          </tr>
+          <tr>
+            <td><code>mercury telegram promote &lt;userId&gt;</code></td>
+            <td>Promote a member to admin</td>
+          </tr>
+          <tr>
+            <td><code>mercury telegram demote &lt;userId&gt;</code></td>
+            <td>Demote an admin to member (at least one admin must remain)</td>
+          </tr>
+          <tr>
+            <td><code>mercury telegram reset</code></td>
+            <td>Clear all Telegram access (admins, members, pending). Start fresh.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h4>In-Chat Commands</h4>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>/start</code> or <code>/pair</code></td>
+            <td>Request access (new users) or check status (approved users)</td>
+          </tr>
+          <tr>
+            <td><code>/unpair</code></td>
+            <td>Admin only: Reset all Telegram access for this Mercury instance</td>
+          </tr>
+        </tbody>
+      </table>
 
       <h3>Features</h3>
       <table class="cmd-table">
@@ -952,8 +1057,8 @@
             <td>Shell command and scope approvals shown as Allow / Always / Deny buttons</td>
           </tr>
           <tr>
-            <td>Paired messaging</td>
-            <td>The <code>send_message</code> tool lets Mercury proactively send you messages</td>
+            <td>Multi-user access</td>
+            <td>Organization model with admins and members. <code>send_message</code> broadcasts to all approved users.</td>
           </tr>
           <tr>
             <td>Bot commands menu</td>
@@ -1419,6 +1524,179 @@
         }
       })
       .catch(function () {});
+  </script>
+
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal" onclick="event.stopPropagation()">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input class="search-input" id="searchInput" type="text" placeholder="Search documentation..." autocomplete="off">
+        <span class="search-input-hint" id="searchHintEsc">ESC</span>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+      <div class="search-footer">
+        <span><kbd>↑↓</kbd> navigate</span>
+        <span><kbd>↵</kbd> open</span>
+        <span><kbd id="searchKbdFooter">esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    var isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 ||
+                navigator.userAgent.indexOf('Mac') > -1;
+    var modKey = isMac ? '\u2318' : 'Ctrl';
+    var modKeyShort = isMac ? '\u2318K' : 'Ctrl+K';
+
+    document.getElementById('searchKbdNav').textContent = modKeyShort;
+    document.getElementById('searchKbdFooter').textContent = isMac ? '\u2318K' : 'Ctrl+K';
+
+    var overlay = document.getElementById('searchOverlay');
+    var input = document.getElementById('searchInput');
+    var resultsEl = document.getElementById('searchResults');
+
+    var sections = [];
+    var currentH2 = '';
+
+    document.querySelectorAll('.docs-content h2, .docs-content h3').forEach(function (el) {
+      if (el.tagName === 'H2') currentH2 = el.textContent.trim();
+      sections.push({
+        id: el.id,
+        title: el.textContent.trim(),
+        section: el.tagName === 'H3' ? currentH2 : '',
+        level: el.tagName
+      });
+    });
+
+    var activeIndex = -1;
+    var matchedItems = [];
+
+    function highlight(text, query) {
+      if (!query) return text;
+      var escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return text.replace(new RegExp('(' + escaped + ')', 'gi'), '<mark>$1</mark>');
+    }
+
+    function search(query) {
+      resultsEl.innerHTML = '';
+      matchedItems = [];
+      activeIndex = -1;
+
+      if (!query.trim()) {
+        sections.slice(0, 8).forEach(function (s) {
+          matchedItems.push(s);
+          var div = document.createElement('a');
+          div.className = 'search-result-item';
+          div.href = '#' + s.id;
+          div.setAttribute('data-index', matchedItems.length - 1);
+          div.innerHTML = (s.section ? '<div class="search-result-section">' + s.section + '</div>' : '') +
+            '<div class="search-result-title">' + s.title + '</div>';
+          div.onclick = function (e) { e.preventDefault(); navigateTo(s.id); };
+          resultsEl.appendChild(div);
+        });
+        return;
+      }
+
+      var q = query.toLowerCase();
+      sections.forEach(function (s) {
+        if (s.title.toLowerCase().indexOf(q) !== -1) {
+          matchedItems.push(s);
+        }
+      });
+
+      if (matchedItems.length === 0) {
+        resultsEl.innerHTML = '<div class="search-empty">No results found</div>';
+        return;
+      }
+
+      matchedItems.forEach(function (s, i) {
+        var div = document.createElement('a');
+        div.className = 'search-result-item';
+        div.href = '#' + s.id;
+        div.setAttribute('data-index', i);
+        div.innerHTML = (s.section ? '<div class="search-result-section">' + highlight(s.section, query) + '</div>' : '') +
+          '<div class="search-result-title">' + highlight(s.title, query) + '</div>';
+        div.onclick = function (e) { e.preventDefault(); navigateTo(s.id); };
+        resultsEl.appendChild(div);
+      });
+
+      setActive(0);
+    }
+
+    function setActive(idx) {
+      if (idx < 0) idx = matchedItems.length - 1;
+      if (idx >= matchedItems.length) idx = 0;
+      activeIndex = idx;
+      var items = resultsEl.querySelectorAll('.search-result-item');
+      items.forEach(function (el, i) {
+        el.classList.toggle('active', i === idx);
+      });
+      if (items[idx]) items[idx].scrollIntoView({ block: 'nearest' });
+    }
+
+    function navigateTo(id) {
+      closeSearch();
+      var target = document.getElementById(id);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        target.style.outline = '2px solid var(--cyan)';
+        setTimeout(function () { target.style.outline = ''; }, 1500);
+      }
+    }
+
+    function openSearch() {
+      overlay.classList.add('open');
+      input.value = '';
+      input.focus();
+      search('');
+    }
+
+    function closeSearch() {
+      overlay.classList.remove('open');
+      input.value = '';
+    }
+
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeSearch();
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if ((isMac ? e.metaKey : e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        if (overlay.classList.contains('open')) closeSearch();
+        else openSearch();
+        return;
+      }
+      if (!overlay.classList.contains('open')) return;
+
+      if (e.key === 'Escape') {
+        closeSearch();
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActive(activeIndex + 1);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActive(activeIndex - 1);
+        return;
+      }
+      if (e.key === 'Enter' && activeIndex >= 0 && activeIndex < matchedItems.length) {
+        e.preventDefault();
+        navigateTo(matchedItems[activeIndex].id);
+        return;
+      }
+    });
+
+    input.addEventListener('input', function () {
+      search(this.value);
+    });
+
+    search('');
+  })();
   </script>
 </body>
 

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { Command } from 'commander';
 import readline from 'node:readline';
 import chalk from 'chalk';
-import figlet from 'figlet';
+
 import {
   loadConfig,
   saveConfig,
@@ -966,6 +966,16 @@ async function runAgent(isDaemon: boolean = false): Promise<void> {
     return 'no';
   });
 
+  if (tgChannel) {
+    tgChannel.setOnPermissionMode((mode, chatId) => {
+      if (mode === 'allow-all') {
+        capabilities.permissions.setAutoApproveAll(true);
+        capabilities.permissions.addTempScope('/', true, true);
+        logger.info({ chatId }, 'Telegram: Allow All mode set for session');
+      }
+    });
+  }
+
   const activeCh = channels.getActiveChannels();
   const toolNames = capabilities.getToolNames();
 
@@ -974,10 +984,18 @@ async function runAgent(isDaemon: boolean = false): Promise<void> {
       console.log(chalk.dim(`  Creator: ${config.identity.creator}`));
     }
     hr();
+
+    const mode = cliChannel && await cliChannel.askPermissionMode?.();
+    if (mode === 'allow-all') {
+      capabilities.permissions.setAutoApproveAll(true);
+      capabilities.permissions.addTempScope('/', true, true);
+    }
+
     console.log('');
     console.log(chalk.green(`  ${name} is live. Type a message and press Enter.`));
     console.log(chalk.dim('  Ctrl+C to exit · /help for commands'));
     console.log('');
+    cliChannel?.showPrompt();
   } else {
     logger.info({ channels: activeCh, tools: toolNames }, 'Mercury is live (daemon mode)');
   }
@@ -1370,6 +1388,71 @@ serviceCmd
   .description('Show system service status')
   .action(() => {
     showServiceStatus();
+  });
+
+program
+  .command('upgrade')
+  .description('Upgrade Mercury to the latest version from npm')
+  .action(async () => {
+    console.log('');
+    console.log(chalk.cyan(`  Mercury ${chalk.white(`v${pkgVersion}`)}`));
+    console.log('');
+
+    const daemon = getDaemonStatus();
+    if (daemon.running) {
+      console.log(chalk.dim('  Stopping background daemon...'));
+      stopDaemon();
+      await new Promise((r) => setTimeout(r, 1000));
+      console.log(chalk.green('  ✓ Daemon stopped'));
+    }
+
+    console.log(chalk.dim('  Checking for latest version...'));
+    const { execSync } = await import('node:child_process');
+
+    let latestVersion = '';
+    try {
+      latestVersion = execSync('npm view @cosmicstack/mercury-agent version', { encoding: 'utf-8' }).trim();
+    } catch {
+      console.log(chalk.red('  ✗ Failed to fetch latest version from npm'));
+      console.log('');
+      return;
+    }
+
+    console.log(chalk.dim(`  Latest: v${latestVersion}`));
+
+    if (latestVersion === pkgVersion) {
+      console.log(chalk.green(`  ✓ Already on the latest version (v${pkgVersion})`));
+      console.log('');
+      return;
+    }
+
+    console.log(chalk.dim(`  Upgrading v${pkgVersion} → v${latestVersion}...`));
+    console.log('');
+
+    try {
+      execSync('npm rm -g @cosmicstack/mercury-agent', { stdio: 'pipe' });
+    } catch {
+      // ignore — old package may not exist or ENOTEMPTY
+      try {
+        const globalDir = execSync('npm root -g', { encoding: 'utf-8' }).trim();
+        const pkgDir = join(globalDir, '@cosmicstack', 'mercury-agent');
+        const { rmSync } = await import('node:fs');
+        try { rmSync(pkgDir, { recursive: true, force: true }); } catch {}
+      } catch {}
+    }
+
+    try {
+      execSync('npm i -g @cosmicstack/mercury-agent@latest', { stdio: 'inherit' });
+      console.log('');
+      console.log(chalk.green(`  ✓ Upgraded to v${latestVersion}`));
+      console.log(chalk.dim('  Run `mercury` to start the new version.'));
+    } catch {
+      console.log('');
+      console.log(chalk.red('  ✗ Upgrade failed. Try manually:'));
+      console.log(chalk.dim('    npm rm -g @cosmicstack/mercury-agent && npm i -g @cosmicstack/mercury-agent'));
+    }
+
+    console.log('');
   });
 
 program.parse();
