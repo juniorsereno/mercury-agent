@@ -80,6 +80,13 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run build
+      - name: Check if version already published
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "@cosmicstack/mercury-agent@$PKG_VERSION" version 2>/dev/null; then
+            echo "Version $PKG_VERSION already published — skipping."
+            exit 0
+          fi
       - run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
