@@ -65,32 +65,41 @@ jobs:
         run: node scripts/verify-package.cjs
 
   termux:
-    name: Termux (Android)
+    name: Termux (Android, ${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        arch: [aarch64, x86_64]
-    container:
-      image: termux/termux-docker:${{ matrix.arch }}
-      options: --privileged
+        include:
+          - arch: x86_64
+            qemu: false
+          - arch: aarch64
+            qemu: true
     steps:
-      - name: Install build dependencies
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU for ARM64
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v3
+
+      - name: Run CI in Termux container
+        shell: bash
         run: |
-          apt update
-          apt install -y git nodejs-lts
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install npm dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Test
-        run: npm test
+          docker run --rm \
+            ${{ matrix.qemu && '--platform linux/arm64' || '' }} \
+            --privileged \
+            -v "${{ github.workspace }}:/home/builder/project" \
+            -e "HOME=/home/builder" \
+            termux/termux-docker:${{ matrix.arch }} \
+            bash -c "
+              set -e
+              pkg update -y
+              pkg install -y git nodejs-lts
+              cd /home/builder/project
+              npm ci
+              npm run build
+              npm test
+            "
 
   publish:
     name: Publish to npm
