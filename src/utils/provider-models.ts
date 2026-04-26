@@ -300,32 +300,25 @@ async function fetchOllamaModels(provider: ProviderName, config: ProviderConfig)
   return buildModelCatalog(provider, ids, config.model);
 }
 
+const OPENCODE_GO_KNOWN_MODELS = [
+  'glm-5.1',
+  'glm-5',
+  'kimi-k2.5',
+  'kimi-k2.6',
+  'deepseek-v4-pro',
+  'deepseek-v4-flash',
+  'mimo-v2-pro',
+  'mimo-v2-omni',
+  'mimo-v2.5-pro',
+  'mimo-v2.5',
+  'minimax-m2.5',
+  'minimax-m2.7',
+  'qwen3.5-plus',
+  'qwen3.6-plus',
+];
+
 async function fetchOpenCodeGoModels(config: ProviderConfig): Promise<ProviderModelCatalog> {
-  const data = await fetchJson<OpenAIModelResponse>(
-    `${trimTrailingSlash(config.baseUrl)}/models`,
-    {
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-      },
-    },
-    'Mercury could not fetch models for this OpenCode Go key. Please re-enter it.',
-  );
-
-  const ids = (data.data ?? [])
-    .map((model) => model.id?.trim() ?? '')
-    .filter((id) => {
-      const lower = id.toLowerCase();
-      return (
-        lower.startsWith('glm-')
-        || lower.startsWith('kimi-')
-        || lower.startsWith('mimo-')
-        || lower.startsWith('minimax-')
-        || lower.startsWith('qwen')
-        || lower.startsWith('deepseek-')
-      );
-    });
-
-  return buildModelCatalog('opencodeGo', ids, config.model);
+  return buildModelCatalog('opencodeGo', [...OPENCODE_GO_KNOWN_MODELS], config.model);
 }
 
 export async function fetchProviderModelCatalog(
