@@ -51,6 +51,7 @@ export type ProviderName =
   | 'anthropic'
   | 'deepseek'
   | 'grok'
+  | 'opencodeGo'
   | 'ollamaCloud'
   | 'ollamaLocal';
 
@@ -66,6 +67,7 @@ export interface MercuryConfig {
     anthropic: ProviderConfig;
     deepseek: ProviderConfig;
     grok: ProviderConfig;
+    opencodeGo: ProviderConfig;
     ollamaCloud: ProviderConfig;
     ollamaLocal: ProviderConfig;
   };
@@ -158,6 +160,13 @@ export function getDefaultConfig(): MercuryConfig {
         baseUrl: getEnv('GROK_BASE_URL', 'https://api.x.ai/v1'),
         model: getEnv('GROK_MODEL', 'grok-4'),
         enabled: getEnvBool('GROK_ENABLED', true),
+      },
+      opencodeGo: {
+        name: 'opencodeGo',
+        apiKey: getEnv('OPENCODE_GO_API_KEY', ''),
+        baseUrl: getEnv('OPENCODE_GO_BASE_URL', 'https://opencode.ai/zen/go/v1'),
+        model: getEnv('OPENCODE_GO_MODEL', 'kimi-k2.6'),
+        enabled: getEnvBool('OPENCODE_GO_ENABLED', true),
       },
       ollamaCloud: {
         name: 'ollamaCloud',

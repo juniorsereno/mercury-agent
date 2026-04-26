@@ -107,6 +107,7 @@ const PROVIDER_OPTIONS: Array<{ key: ProviderName; label: string }> = [
   { key: 'openai', label: 'OpenAI' },
   { key: 'anthropic', label: 'Anthropic' },
   { key: 'grok', label: 'Grok (xAI)' },
+  { key: 'opencodeGo', label: 'OpenCode Go' },
   { key: 'ollamaCloud', label: 'Ollama Cloud' },
   { key: 'ollamaLocal', label: 'Ollama Local' },
 ];
@@ -245,6 +246,12 @@ function validateApiKey(provider: ProviderName, value: string): string | null {
     return looksLikeToken(value)
       ? null
       : 'Ollama Cloud keys must look like a real API token: long, no spaces, and not plain text.';
+  }
+
+  if (provider === 'opencodeGo') {
+    return looksLikeToken(value)
+      ? null
+      : 'OpenCode Go keys must look like a real API token: long, no spaces, and not plain text.';
   }
 
   return null;
@@ -638,6 +645,23 @@ async function configure(existingConfig?: MercuryConfig): Promise<void> {
           config.providers.grok.apiKey = result.apiKey;
           config.providers.grok.model = result.model;
           config.providers.grok.enabled = true;
+        }
+        continue;
+      }
+
+      if (provider === 'opencodeGo') {
+        const mask = isReconfig && config.providers.opencodeGo.apiKey ? ` [${maskKey(config.providers.opencodeGo.apiKey)}]` : '';
+        const result = await promptApiKeyWithModelSelection(
+          config,
+          'opencodeGo',
+          'OpenCode Go',
+          chalk.white(`  OpenCode Go API key${mask}${isReconfig ? '' : ' (Enter to skip)'}: `),
+          isReconfig,
+        );
+        if (!result.skipped && result.apiKey && result.model) {
+          config.providers.opencodeGo.apiKey = result.apiKey;
+          config.providers.opencodeGo.model = result.model;
+          config.providers.opencodeGo.enabled = true;
         }
         continue;
       }

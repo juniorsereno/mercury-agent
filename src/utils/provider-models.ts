@@ -40,6 +40,23 @@ const GROK_PREFERRED_MODELS = [
   'grok-3-latest',
 ] as const;
 
+const OPENCODE_GO_PREFERRED_MODELS = [
+  'kimi-k2.6',
+  'kimi-k2.5',
+  'glm-5.1',
+  'glm-5',
+  'deepseek-v4-pro',
+  'deepseek-v4-flash',
+  'qwen3.6-plus',
+  'qwen3.5-plus',
+  'mimo-v2.5-pro',
+  'mimo-v2.5',
+  'mimo-v2-pro',
+  'mimo-v2-omni',
+  'minimax-m2.7',
+  'minimax-m2.5',
+] as const;
+
 const OLLAMA_CLOUD_PREFERRED_MODELS = [
   'gpt-oss:120b',
   'gpt-oss:120b-cloud',
@@ -152,6 +169,7 @@ function chooseRecommendedModel(
     openai: OPENAI_PREFERRED_MODELS,
     anthropic: ANTHROPIC_PREFERRED_MODELS,
     grok: GROK_PREFERRED_MODELS,
+    opencodeGo: OPENCODE_GO_PREFERRED_MODELS,
     ollamaCloud: OLLAMA_CLOUD_PREFERRED_MODELS,
     ollamaLocal: OLLAMA_LOCAL_PREFERRED_MODELS,
   };
@@ -185,6 +203,7 @@ export function buildModelCatalog(
     openai: OPENAI_PREFERRED_MODELS,
     anthropic: ANTHROPIC_PREFERRED_MODELS,
     grok: GROK_PREFERRED_MODELS,
+    opencodeGo: OPENCODE_GO_PREFERRED_MODELS,
     ollamaCloud: OLLAMA_CLOUD_PREFERRED_MODELS,
     ollamaLocal: OLLAMA_LOCAL_PREFERRED_MODELS,
   };
@@ -281,6 +300,34 @@ async function fetchOllamaModels(provider: ProviderName, config: ProviderConfig)
   return buildModelCatalog(provider, ids, config.model);
 }
 
+async function fetchOpenCodeGoModels(config: ProviderConfig): Promise<ProviderModelCatalog> {
+  const data = await fetchJson<OpenAIModelResponse>(
+    `${trimTrailingSlash(config.baseUrl)}/models`,
+    {
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+    },
+    'Mercury could not fetch models for this OpenCode Go key. Please re-enter it.',
+  );
+
+  const ids = (data.data ?? [])
+    .map((model) => model.id?.trim() ?? '')
+    .filter((id) => {
+      const lower = id.toLowerCase();
+      return (
+        lower.startsWith('glm-')
+        || lower.startsWith('kimi-')
+        || lower.startsWith('mimo-')
+        || lower.startsWith('minimax-')
+        || lower.startsWith('qwen')
+        || lower.startsWith('deepseek-')
+      );
+    });
+
+  return buildModelCatalog('opencodeGo', ids, config.model);
+}
+
 export async function fetchProviderModelCatalog(
   provider: ProviderName,
   config: ProviderConfig,
@@ -291,6 +338,10 @@ export async function fetchProviderModelCatalog(
 
   if (provider === 'grok') {
     return fetchGrokModels(config);
+  }
+
+  if (provider === 'opencodeGo') {
+    return fetchOpenCodeGoModels(config);
   }
 
   if (provider === 'ollamaCloud' || provider === 'ollamaLocal') {

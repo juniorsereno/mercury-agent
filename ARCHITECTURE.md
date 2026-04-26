@@ -60,6 +60,7 @@ src/
 │   ├── base.ts           # Abstract provider + getModelInstance()
 │   ├── openai-compat.ts
 │   ├── anthropic.ts
+│   ├── opencode-go.ts    # OpenCode Go (dual OpenAI/Anthropic SDK)
 │   └── registry.ts
 ├── soul/                 # Consciousness
 │   └── identity.ts       # Soul/persona/taste loader + guardrails

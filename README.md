@@ -233,6 +233,7 @@ Configure multiple LLM providers. Mercury tries them in order and falls back aut
 | **OpenAI** | gpt-4o-mini | `OPENAI_API_KEY` | GPT-4o, o3, etc. |
 | **Anthropic** | claude-sonnet-4 | `ANTHROPIC_API_KEY` | Claude Sonnet, Haiku, Opus |
 | **Grok (xAI)** | grok-4 | `GROK_API_KEY` | OpenAI-compatible endpoint |
+| **OpenCode Go** | kimi-k2.6 | `OPENCODE_GO_API_KEY` | OpenAI/Anthropic-compatible, 14+ open models |
 | **Ollama Cloud** | gpt-oss:120b | `OLLAMA_CLOUD_API_KEY` | Remote Ollama via API |
 | **Ollama Local** | gpt-oss:20b | No key needed | Local Ollama instance |
 
